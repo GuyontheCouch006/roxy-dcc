@@ -1,0 +1,315 @@
+{
+  "objects": [
+    {
+      "name": "light",
+      "shape": {
+        "type": "sphere",
+        "radius": 0.75
+      },
+      "material": {
+        "type": "emissive",
+        "albedo": [
+          1.0,
+          0.95,
+          0.85
+        ],
+        "intensity": 80.0
+      },
+      "transform": {
+        "translation": [
+          0,
+          20,
+          -5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "red sphere",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.85,
+          0.2,
+          0.15
+        ]
+      },
+      "transform": {
+        "translation": [
+          -2.5,
+          0.5,
+          -5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "mirror sphere",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "metal",
+        "albedo": [
+          0.8,
+          0.8,
+          0.9
+        ],
+        "roughness": 0.05
+      },
+      "transform": {
+        "translation": [
+          0,
+          0.5,
+          -5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "blue sphere",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.2,
+          0.4,
+          0.85
+        ]
+      },
+      "transform": {
+        "translation": [
+          2.5,
+          0.5,
+          -5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "yellow cube",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.5
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.9,
+          0.9,
+          0.2
+        ]
+      },
+      "transform": {
+        "translation": [
+          0,
+          0.75,
+          -2
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "ground",
+      "shape": {
+        "type": "plane",
+        "normal": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "distance": 0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.5,
+          0.5,
+          0.5
+        ]
+      },
+      "transform": {
+        "translation": [
+          0,
+          -0.5,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    }
+  ],
+  "lights": [],
+  "cameras": [
+    {
+      "position": [
+        0,
+        2,
+        6
+      ],
+      "forward": [
+        0.0,
+        -0.19611613513818404,
+        -0.9805806756909201
+      ],
+      "up": [
+        0.0,
+        0.9805806756909203,
+        -0.1961161351381841
+      ],
+      "fov": 55,
+      "aspect_ratio": 1.3333333333333333
+    }
+  ],
+  "background_color": [
+    0,
+    0,
+    0
+  ],
+  "use_sky": false
+}

@@ -1,0 +1,427 @@
+{
+  "objects": [
+    {
+      "name": "floor",
+      "shape": {
+        "type": "plane",
+        "normal": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "distance": 0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.73,
+          0.73,
+          0.73
+        ]
+      },
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "ceiling",
+      "shape": {
+        "type": "plane",
+        "normal": [
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "distance": 0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.73,
+          0.73,
+          0.73
+        ]
+      },
+      "transform": {
+        "translation": [
+          0,
+          5.5,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "back wall",
+      "shape": {
+        "type": "plane",
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "distance": 0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.73,
+          0.73,
+          0.73
+        ]
+      },
+      "transform": {
+        "translation": [
+          0,
+          0,
+          -8
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "left wall",
+      "shape": {
+        "type": "plane",
+        "normal": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "distance": 0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.65,
+          0.05,
+          0.05
+        ]
+      },
+      "transform": {
+        "translation": [
+          -2.75,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "right wall",
+      "shape": {
+        "type": "plane",
+        "normal": [
+          -1.0,
+          0.0,
+          0.0
+        ],
+        "distance": 0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.12,
+          0.45,
+          0.15
+        ]
+      },
+      "transform": {
+        "translation": [
+          2.75,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "light",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "emissive",
+        "albedo": [
+          1.0,
+          0.95,
+          0.85
+        ],
+        "intensity": 25.0
+      },
+      "transform": {
+        "translation": [
+          0,
+          5.48,
+          -4.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.5,
+          0.05,
+          1.5
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "tall box",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.5
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.73,
+          0.73,
+          0.73
+        ]
+      },
+      "transform": {
+        "translation": [
+          -1.1,
+          1.5,
+          -5.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1.0,
+          2.0,
+          1.0
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "short box",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.5
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.73,
+          0.73,
+          0.73
+        ]
+      },
+      "transform": {
+        "translation": [
+          1.1,
+          0.75,
+          -4.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    }
+  ],
+  "lights": [],
+  "cameras": [
+    {
+      "name": "camera",
+      "position": [
+        0,
+        2.75,
+        3.5
+      ],
+      "forward": [
+        0.0,
+        -0.04993761694389223,
+        -0.9987523388778446
+      ],
+      "up": [
+        0.0,
+        0.9987523388778449,
+        -0.049937616943892246
+      ],
+      "fov": 45,
+      "aspect_ratio": 1.0
+    }
+  ],
+  "background_color": [
+    0,
+    0,
+    0
+  ],
+  "use_sky": false
+}

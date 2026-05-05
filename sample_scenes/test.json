@@ -1,0 +1,80 @@
+{
+  "objects": [
+    {
+      "name": "red sphere",
+      "shape": { "type": "sphere", "radius": 0.5 },
+      "material": { "type": "diffuse", "albedo": [0.8, 0.2, 0.2] },
+      "transform": {
+        "translation": [0.0, 0.0, -3.0],
+        "rotation":    [0.0, 0.0,  0.0],
+        "scale":       [1.0, 1.0,  1.0],
+        "shear":       [0.0, 0.0,  0.0],
+        "pivot":       [0.0, 0.0,  0.0],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "metal ball",
+      "shape": { "type": "sphere", "radius": 0.5 },
+      "material": { "type": "metal", "albedo": [0.8, 0.8, 0.9], "roughness": 0.05 },
+      "transform": {
+        "translation": [1.2, 0.0, -3.0],
+        "rotation":    [0.0, 0.0,  0.0],
+        "scale":       [1.0, 1.0,  1.0],
+        "shear":       [0.0, 0.0,  0.0],
+        "pivot":       [0.0, 0.0,  0.0],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "glass ball",
+      "shape": { "type": "sphere", "radius": 0.5 },
+      "material": { "type": "dielectric", "albedo": [1.0, 1.0, 1.0], "ior": 1.5 },
+      "transform": {
+        "translation": [-1.2, 0.0, -3.0],
+        "rotation":    [0.0,  0.0,  0.0],
+        "scale":       [1.0,  1.0,  1.0],
+        "shear":       [0.0,  0.0,  0.0],
+        "pivot":       [0.0,  0.0,  0.0],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "ground plane",
+      "shape": { "type": "plane", "normal": [0.0, 1.0, 0.0], "distance": 0 },
+      "material": { "type": "diffuse", "albedo": [0.5, 0.5, 0.5] },
+      "transform": {
+        "translation": [0.0, -0.5, 0.0],
+        "rotation":    [0.0,  0.0, 0.0],
+        "scale":       [1.0,  1.0, 1.0],
+        "shear":       [0.0,  0.0, 0.0],
+        "pivot":       [0.0,  0.0, 0.0],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    }
+  ],
+  "lights": [],
+  "cameras": [
+    {
+      "position": [0.0, 1.0, 2.0],
+      "forward":  [0.0, -0.2, -1.0],
+      "up":       [0.0,  1.0,  0.0],
+      "fov": 60,
+      "aspect_ratio": 1.3333333333333333
+    }
+  ],
+  "background_color": [0.0, 0.0, 0.0],
+  "use_sky": true
+}
