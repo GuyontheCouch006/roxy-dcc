@@ -1,5 +1,9 @@
 /.claude
 /.env
 /.vscode
-/__pycache__
+__pycache__/
+*.pyc
+*.pyo
 /app_deprecated
+/memory/
+taichitest.py
