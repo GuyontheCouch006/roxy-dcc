@@ -1,9 +1,53 @@
+# Project-specific
 /.claude
 /.env
 /.vscode
-__pycache__/
-*.pyc
-*.pyo
 /app_deprecated
 /memory/
 taichitest.py
+tempCodeRunnerFile.py
+
+# Python
+__pycache__/
+*.py[codz]
+*.pyo
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv
+venv/
+env/
+ENV/
+
+# Testing
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+htmlcov/
+.pytest_cache/
+
+# Type checkers
+.mypy_cache/
+.dmypy.json
+.pyre/
+.pytype/
+
+# Tools
+.ruff_cache/
+cython_debug/
+.pdm-python
+.pixi
+
+# Jupyter
+.ipynb_checkpoints
