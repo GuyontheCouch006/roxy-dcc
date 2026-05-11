@@ -7,6 +7,7 @@
 # ============================================
 
 from scene import Sphere, Diffuse, SceneObject
+from scene.materials import Glossy
 from core import Vec3, Ray, Color, RotationOrder
 from tests.utils import run_tests, approx_eq, vec3_approx_eq
 
@@ -153,6 +154,74 @@ def test_intersect_scaled_sphere_hit_at_correct_distance():
     assert hit is not None
     assert approx_eq(hit.t, 3.0), f"Expected t=3, got {hit.t}"
 
+def test_intersect_returns_child_when_child_is_closer_than_parent():
+    parent_mat = Diffuse(Color(1, 0, 0))
+    child_mat = Diffuse(Color(0, 1, 0))
+    parent = SceneObject(
+        shape=Sphere(),
+        material=parent_mat,
+        translation=Vec3(0, 0, 5),
+    )
+    child = SceneObject(
+        shape=Sphere(),
+        material=child_mat,
+        translation=Vec3(0, 0, -3),
+    )
+    parent.add_child(child)
+
+    hit = parent.intersect(_ray((0, 0, 0), (0, 0, 1)))
+
+    assert hit is not None
+    assert approx_eq(hit.t, 1.0), f"Expected child hit at t=1, got {hit.t}"
+    assert hit.material is child_mat
+
+def test_intersect_skips_non_renderable_child():
+    root = SceneObject(name="root")
+    root.add_child(_sphere_obj(renderable=False))
+
+    hit = root.intersect(_ray((0, 0, -5), (0, 0, 1)))
+
+    assert hit is None
+
+
+# ─── Taichi export ────────────────────────────────────────────────────────────
+
+def test_taichi_export_uses_parent_world_transform_for_primitives():
+    parent = SceneObject(name="parent", translation=Vec3(10, 0, 0))
+    child = _sphere_obj(translation=Vec3(1, 0, 0))
+    parent.add_child(child)
+
+    exported = child.taichi_export()
+
+    assert exported["center"] == [11, 0, 0]
+
+def test_taichi_export_preserves_glossy_roughness_for_primitives():
+    obj = SceneObject(
+        shape=Sphere(),
+        material=Glossy(Color(1, 1, 1), roughness=0.7),
+    )
+
+    exported = obj.taichi_export()
+
+    assert exported["mat_type"] == 4
+    assert approx_eq(exported["roughness"], 0.7)
+
+
+# ─── Serialization ────────────────────────────────────────────────────────────
+
+def test_scene_graph_round_trips_children_and_shapes():
+    root = SceneObject(name="root")
+    child = _sphere_obj(name="child", translation=Vec3(1, 2, 3))
+    root.add_child(child)
+
+    restored = SceneObject.from_dict(root.to_dict())
+
+    assert restored.name == "root"
+    assert len(restored.children) == 1
+    assert restored.children[0].name == "child"
+    assert isinstance(restored.children[0].shape, Sphere)
+    assert vec3_approx_eq(restored.children[0].translation, Vec3(1, 2, 3))
+
 
 # ─── Repr ─────────────────────────────────────────────────────────────────────
 
@@ -192,6 +261,11 @@ if __name__ == "__main__":
         test_intersect_translated_sphere_hit,
         test_intersect_translated_sphere_miss,
         test_intersect_scaled_sphere_hit_at_correct_distance,
+        test_intersect_returns_child_when_child_is_closer_than_parent,
+        test_intersect_skips_non_renderable_child,
+        test_taichi_export_uses_parent_world_transform_for_primitives,
+        test_taichi_export_preserves_glossy_roughness_for_primitives,
+        test_scene_graph_round_trips_children_and_shapes,
         test_repr_contains_name,
         test_repr_contains_scene_object,
     ]

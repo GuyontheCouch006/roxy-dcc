@@ -2,12 +2,15 @@
 # Author: Seth
 # Date: May 2026
 # Version: 1.0
-# Description: Tests for Shape implementations — Sphere bounds, normals,
-#              front/back face detection, and ray intersection (hit, miss, inside).
+# Description: Tests for Primitive implementations — Sphere bounds, normals,
+#              and ray intersection (hit, miss, inside).
+#              Primitives return PrimitiveHit(t, normal, uv); front_face
+#              correction is Shape's responsibility and tested in scene_object_tests.
 # ============================================
 
 import math
 from scene import Sphere
+from scene.primitives import PrimitiveHit
 from core import Vec3, Ray
 from tests.utils import run_tests, approx_eq, vec3_approx_eq
 
@@ -52,21 +55,18 @@ def test_ray_hits_sphere_front():
     ray = Ray(Vec3(0, 0, -5), Vec3(0, 0, 1))
     hit = s.intersect(ray)
     assert hit is not None
+    assert isinstance(hit, PrimitiveHit)
     assert approx_eq(hit.t, 4.0), f"Expected t=4, got {hit.t}"
 
 def test_hit_point_on_surface():
     s = Sphere()
     ray = Ray(Vec3(0, 0, -5), Vec3(0, 0, 1))
     hit = s.intersect(ray)
-    assert vec3_approx_eq(hit.point, Vec3(0, 0, -1))
+    point = ray.at(hit.t)
+    assert vec3_approx_eq(point, Vec3(0, 0, -1))
 
-def test_front_face_hit_is_front_face():
-    s = Sphere()
-    ray = Ray(Vec3(0, 0, -5), Vec3(0, 0, 1))
-    hit = s.intersect(ray)
-    assert hit.front_face
-
-def test_front_face_normal_points_outward():
+def test_front_face_outward_normal():
+    # PrimitiveHit carries the outward surface normal (no front_face correction).
     s = Sphere()
     ray = Ray(Vec3(0, 0, -5), Vec3(0, 0, 1))
     hit = s.intersect(ray)
@@ -82,17 +82,12 @@ def test_ray_inside_sphere_hits_back():
     assert hit is not None
     assert approx_eq(hit.t, 1.0), f"Expected t=1, got {hit.t}"
 
-def test_ray_inside_sphere_is_back_face():
+def test_ray_inside_sphere_outward_normal_points_forward():
+    # Inside hit: the outward normal at z=+1 is (0,0,1) — points away from center.
     s = Sphere()
     ray = Ray(Vec3(0, 0, 0), Vec3(0, 0, 1))
     hit = s.intersect(ray)
-    assert not hit.front_face
-
-def test_ray_inside_sphere_normal_flipped_inward():
-    s = Sphere()
-    ray = Ray(Vec3(0, 0, 0), Vec3(0, 0, 1))
-    hit = s.intersect(ray)
-    assert vec3_approx_eq(hit.normal, Vec3(0, 0, -1))
+    assert vec3_approx_eq(hit.normal, Vec3(0, 0, 1))
 
 
 # --- intersect: misses ---
@@ -126,11 +121,9 @@ if __name__ == "__main__":
         test_normal_at_top,
         test_ray_hits_sphere_front,
         test_hit_point_on_surface,
-        test_front_face_hit_is_front_face,
-        test_front_face_normal_points_outward,
+        test_front_face_outward_normal,
         test_ray_inside_sphere_hits_back,
-        test_ray_inside_sphere_is_back_face,
-        test_ray_inside_sphere_normal_flipped_inward,
+        test_ray_inside_sphere_outward_normal_points_forward,
         test_ray_misses_sphere,
         test_ray_behind_sphere_misses,
         test_repr,

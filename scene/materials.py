@@ -145,6 +145,31 @@ class Emissive(Material):
     def to_dict(self):
         return {"type": "emissive", "albedo": self._albedo.to_dict(), "intensity": self._intensity}
 
+class Glossy(Material):
+    """Glossy material — a mix of diffuse and metal based on roughness."""
+
+    def __init__(self, albedo, roughness=0.5):
+        super().__init__(albedo)
+        self._roughness = min(max(roughness, 0.0), 1.0)
+
+    def taichi_type_id(self): return 4
+    def taichi_params(self): return [self._roughness]
+
+    def scatter(self, ray_in, hit_record):
+        diffuse_part = Diffuse(self._albedo).scatter(ray_in, hit_record)
+        metal_part = Metal(self._albedo, self._roughness).scatter(ray_in, hit_record)
+        if diffuse_part and metal_part:
+            if random.random() < self._roughness:
+                return diffuse_part
+            else:
+                return metal_part
+        return diffuse_part or metal_part
+
+    def __repr__(self):
+        return f"Glossy(albedo={self._albedo}, roughness={self._roughness})"
+
+    def to_dict(self):
+        return {"type": "glossy", "albedo": self._albedo.to_dict(), "roughness": self._roughness}
 
 def create_material_from_dict(data):
     mat_type = data["type"]
@@ -157,5 +182,7 @@ def create_material_from_dict(data):
         return Dielectric(albedo, data["ior"])
     elif mat_type == "emissive":
         return Emissive(albedo, data["intensity"])
+    elif mat_type == "glossy":
+        return Glossy(albedo, data["roughness"])
     else:
         raise ValueError(f"Unknown material type: {mat_type}")

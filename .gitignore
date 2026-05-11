@@ -7,6 +7,12 @@
 taichitest.py
 tempCodeRunnerFile.py
 
+# Large mesh assets (>50 MB — keep local, not in git)
+sample_scenes/dragon.obj
+sample_scenes/gallery/gallery.obj
+sample_scenes/roadBike/roadBike.obj
+.DS_Store
+
 # Python
 __pycache__/
 *.py[codz]

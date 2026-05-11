@@ -14,23 +14,27 @@ class HitRecord:
     outward for front-face hits, flipped for back-face (interior) hits.
     """
 
-    def __init__(self, t, point, normal, material, front_face):
+    def __init__(self, t, point, normal, material, front_face, uv=None):
         self._t = t
         self._point = point
         self._normal = normal
         self._material = material
         self._front_face = front_face
+        self._uv = uv  # Optional UV coordinates for texture mapping
 
     @classmethod
-    def from_ray(cls, ray, t, outward_normal, material=None):
+    def from_ray(cls, ray, t, outward_normal, material=None, uv=None):
         """Construct a HitRecord, orienting the normal against the ray."""
         point = ray.at(t)
         front_face = ray.direction.dot(outward_normal) < 0
         normal = outward_normal if front_face else -outward_normal
-        return cls(t, point, normal, material, front_face)
+        return cls(t, point, normal, material, front_face, uv)
 
     @property
     def t(self): return self._t
+
+    @property
+    def uv(self): return self._uv
 
     @property
     def point(self): return self._point
@@ -67,3 +71,4 @@ class HitRecord:
         yield self._normal
         yield self._material
         yield self._front_face
+        yield self._uv

@@ -5,9 +5,12 @@
 # Description: Public API for the scene package.
 # ============================================
 
-from scene.shapes import Sphere, Plane, Cube
-from scene.materials import Material, Diffuse, Metal, Dielectric
+from scene.primitives import Sphere, Plane, Cube, Torus, Primitive, create_primitive_from_dict
+from scene.shape import Shape
+from scene.mesh import IndexedMesh, Mesh, Triangle
 from scene.scene_object import SceneObject
 from scene.world import World
 from scene.camera import Camera
+from scene.materials import (Material, Diffuse, Metal, Dielectric,
+                              Emissive, Glossy, create_material_from_dict)
 from scene.io import load_scene, save_scene

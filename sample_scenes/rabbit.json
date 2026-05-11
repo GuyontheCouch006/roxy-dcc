@@ -1,0 +1,2665 @@
+{
+  "objects": [
+    {
+      "name": "ground",
+      "shape": {
+        "type": "plane",
+        "normal": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "distance": 0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.5,
+          0.42,
+          0.28
+        ]
+      },
+      "transform": {
+        "translation": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "body",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.88,
+          0.85,
+          0.82
+        ]
+      },
+      "transform": {
+        "translation": [
+          0,
+          1.1,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.88,
+          0.96,
+          0.82
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "belly",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.95,
+          0.93,
+          0.9
+        ]
+      },
+      "transform": {
+        "translation": [
+          0,
+          0.88,
+          0.52
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.52,
+          0.58,
+          0.38
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "head",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.88,
+          0.85,
+          0.82
+        ]
+      },
+      "transform": {
+        "translation": [
+          0,
+          2.15,
+          0.32
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.58,
+          0.58,
+          0.58
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "snout",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.95,
+          0.93,
+          0.9
+        ]
+      },
+      "transform": {
+        "translation": [
+          0,
+          1.98,
+          0.8
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.29,
+          0.22,
+          0.22
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "nose",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.92,
+          0.6,
+          0.66
+        ]
+      },
+      "transform": {
+        "translation": [
+          0,
+          2.02,
+          0.98
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.056,
+          0.046,
+          0.046
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "eye_L",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "metal",
+        "albedo": [
+          0.04,
+          0.03,
+          0.03
+        ],
+        "roughness": 0.04
+      },
+      "transform": {
+        "translation": [
+          -0.22,
+          2.28,
+          0.66
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.088,
+          0.088,
+          0.088
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "eye_hi_L",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.95,
+          0.93,
+          0.9
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.192,
+          2.31,
+          0.72
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.026,
+          0.026,
+          0.026
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "eye_R",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "metal",
+        "albedo": [
+          0.04,
+          0.03,
+          0.03
+        ],
+        "roughness": 0.04
+      },
+      "transform": {
+        "translation": [
+          0.22,
+          2.28,
+          0.66
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.088,
+          0.088,
+          0.088
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "eye_hi_R",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.95,
+          0.93,
+          0.9
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.248,
+          2.31,
+          0.72
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.026,
+          0.026,
+          0.026
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "ear_L",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.88,
+          0.85,
+          0.82
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.24,
+          3.05,
+          0.14
+        ],
+        "rotation": [
+          4,
+          -10,
+          0
+        ],
+        "scale": [
+          0.14,
+          0.88,
+          0.09
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "ear_inner_L",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.92,
+          0.6,
+          0.66
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.24,
+          3.05,
+          0.2
+        ],
+        "rotation": [
+          4,
+          -10,
+          0
+        ],
+        "scale": [
+          0.075,
+          0.74,
+          0.03
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "ear_R",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.88,
+          0.85,
+          0.82
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.24,
+          3.05,
+          0.14
+        ],
+        "rotation": [
+          4,
+          10,
+          0
+        ],
+        "scale": [
+          0.14,
+          0.88,
+          0.09
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "ear_inner_R",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.92,
+          0.6,
+          0.66
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.24,
+          3.05,
+          0.2
+        ],
+        "rotation": [
+          4,
+          10,
+          0
+        ],
+        "scale": [
+          0.075,
+          0.74,
+          0.03
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "tail",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.95,
+          0.93,
+          0.9
+        ]
+      },
+      "transform": {
+        "translation": [
+          0,
+          1.02,
+          -0.86
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.29,
+          0.26,
+          0.23
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "foot_L",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.88,
+          0.85,
+          0.82
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.44,
+          0.19,
+          0.3
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.28,
+          0.14,
+          0.5
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "foot_R",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.88,
+          0.85,
+          0.82
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.44,
+          0.19,
+          0.3
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.28,
+          0.14,
+          0.5
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "paw_L",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.88,
+          0.85,
+          0.82
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.52,
+          0.26,
+          0.66
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.2,
+          0.13,
+          0.28
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "arm_R",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.88,
+          0.85,
+          0.82
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.5,
+          0.76,
+          0.52
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.16,
+          0.32,
+          0.16
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "paw_R",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.88,
+          0.85,
+          0.82
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.54,
+          0.44,
+          0.7
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.18,
+          0.13,
+          0.22
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "carrot",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.96,
+          0.44,
+          0.06
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.74,
+          0.86,
+          0.64
+        ],
+        "rotation": [
+          15,
+          12,
+          28
+        ],
+        "scale": [
+          0.1,
+          0.44,
+          0.1
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "carrot_tip",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.96,
+          0.44,
+          0.06
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.82,
+          0.56,
+          0.74
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.072,
+          0.072,
+          0.072
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "carrot_green_0",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.12,
+          0.52,
+          0.1
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.74,
+          1.14,
+          0.64
+        ],
+        "rotation": [
+          -30,
+          0,
+          0
+        ],
+        "scale": [
+          0.03,
+          0.2,
+          0.028
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "carrot_green_1",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.12,
+          0.52,
+          0.1
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.7,
+          1.14,
+          0.67
+        ],
+        "rotation": [
+          -25,
+          0,
+          18
+        ],
+        "scale": [
+          0.03,
+          0.2,
+          0.028
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "carrot_green_2",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.12,
+          0.52,
+          0.1
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.78,
+          1.14,
+          0.62
+        ],
+        "rotation": [
+          -28,
+          0,
+          -15
+        ],
+        "scale": [
+          0.03,
+          0.2,
+          0.028
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "carrot_green_3",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.12,
+          0.52,
+          0.1
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.75,
+          1.14,
+          0.6900000000000001
+        ],
+        "rotation": [
+          -20,
+          0,
+          30
+        ],
+        "scale": [
+          0.03,
+          0.2,
+          0.028
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_0",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.15074357331894203,
+          0.4104398064594472,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.5637351525338805,
+          0.14811213676478246,
+          -0.6681318173660957
+        ],
+        "rotation": [
+          -11.971783973308803,
+          65.82400504426539,
+          1.0046961205872975
+        ],
+        "scale": [
+          0.032,
+          0.29622427352956493,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_1",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.12232389646070146,
+          0.42228435300693623,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -1.4800138929856486,
+          0.07838265082895428,
+          -0.04597949594275097
+        ],
+        "rotation": [
+          -11.460035626371779,
+          148.83338244096686,
+          -2.11346270400961
+        ],
+        "scale": [
+          0.032,
+          0.15676530165790856,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_2",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.12896092863316763,
+          0.5545243226287623,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.40778631169788593,
+          0.13925235383409984,
+          1.0849596734054128
+        ],
+        "rotation": [
+          -2.8929467097781547,
+          8.38488251119613,
+          13.33514295660176
+        ],
+        "scale": [
+          0.032,
+          0.2785047076681997,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_3",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.13723975427257312,
+          0.5150044244067131,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -1.1383837332562,
+          0.10701781889223214,
+          -0.7408570762275896
+        ],
+        "rotation": [
+          8.85153805536088,
+          104.68802945924392,
+          -8.939661362129751
+        ],
+        "scale": [
+          0.032,
+          0.21403563778446427,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_4",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.15855618635076388,
+          0.4565464906678225,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.1527822902705851,
+          0.07715214039594792,
+          -0.861864255058689
+        ],
+        "rotation": [
+          -8.233156041058857,
+          76.96661502049251,
+          5.051199249090004
+        ],
+        "scale": [
+          0.032,
+          0.15430428079189584,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_5",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.1875137495573429,
+          0.49453537068606124,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.14980999561351882,
+          0.16532553778269893,
+          -0.3405126068998988
+        ],
+        "rotation": [
+          5.571844144427995,
+          103.39626784656078,
+          -7.165297699779719
+        ],
+        "scale": [
+          0.032,
+          0.33065107556539786,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_6",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.14889631004758058,
+          0.4273572162388909,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.7342249262054965,
+          0.18762098169910985,
+          -0.36653691724158965
+        ],
+        "rotation": [
+          -10.694158208861062,
+          136.2853673217449,
+          -2.292560990013639
+        ],
+        "scale": [
+          0.032,
+          0.3752419633982197,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_7",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.15943698771050185,
+          0.5251531659292586,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -1.4745367774481997,
+          0.16174850394553758,
+          0.47007488437566947
+        ],
+        "rotation": [
+          2.0447263277667496,
+          56.474552312657416,
+          10.513378731264872
+        ],
+        "scale": [
+          0.032,
+          0.32349700789107516,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_8",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.17014920213044238,
+          0.41092049696749955,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.25566465370397506,
+          0.17079613366150498,
+          0.0036517288631088274
+        ],
+        "rotation": [
+          12.451070663022247,
+          119.54739698544141,
+          -0.7252465522499545
+        ],
+        "scale": [
+          0.032,
+          0.34159226732300996,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_9",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.1461695286299766,
+          0.40406132705000597,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.47081233448854,
+          0.1686309743931658,
+          1.1848110668265952
+        ],
+        "rotation": [
+          -6.031325101363821,
+          120.35748885915388,
+          -3.197839611492096
+        ],
+        "scale": [
+          0.032,
+          0.3372619487863316,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_10",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.18714219741262994,
+          0.4703709465639809,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -1.0622451874990575,
+          0.07707453031975725,
+          -0.7423892521401898
+        ],
+        "rotation": [
+          7.51052367723058,
+          44.570670065444574,
+          -10.378473783476842
+        ],
+        "scale": [
+          0.032,
+          0.1541490606395145,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_11",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.14152965172116988,
+          0.4501157916125015,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -1.3421398361595565,
+          0.1359327890972845,
+          -0.011787717911471818
+        ],
+        "rotation": [
+          10.734747140362348,
+          155.51720454573274,
+          8.939835459400758
+        ],
+        "scale": [
+          0.032,
+          0.271865578194569,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_12",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.14849627303413568,
+          0.442000495062555,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.45193227093880073,
+          0.18492774447567895,
+          0.9452242198360776
+        ],
+        "rotation": [
+          -9.77421463784895,
+          41.75223602751644,
+          -9.065903602269632
+        ],
+        "scale": [
+          0.032,
+          0.3698554889513579,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_13",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.1690493657135978,
+          0.5715576265945171,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.28519521194321795,
+          0.07049123240620768,
+          -0.42195743754321646
+        ],
+        "rotation": [
+          -2.2694979684908176,
+          101.94142026715055,
+          -3.66089995894769
+        ],
+        "scale": [
+          0.032,
+          0.14098246481241536,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_14",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.17978731211965662,
+          0.5574123731442058,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.04957258582649082,
+          0.15114400989394017,
+          0.358704048700081
+        ],
+        "rotation": [
+          -12.488198989733874,
+          140.3945083270931,
+          11.186924281622659
+        ],
+        "scale": [
+          0.032,
+          0.30228801978788034,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_15",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.11623031877720974,
+          0.4375773733803096,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.34438749794794044,
+          0.08242445124523892,
+          -0.12224656889539942
+        ],
+        "rotation": [
+          3.760107839199854,
+          12.122570851744472,
+          -12.257060994676747
+        ],
+        "scale": [
+          0.032,
+          0.16484890249047784,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_16",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.18743323773738196,
+          0.40459015959990624,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.5118283128565011,
+          0.0700279938281628,
+          -0.8843336714414127
+        ],
+        "rotation": [
+          -9.764581896176018,
+          65.44978596622278,
+          -11.158997695367297
+        ],
+        "scale": [
+          0.032,
+          0.1400559876563256,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_17",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.1993102721704714,
+          0.5528086467672306,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          0.36502076092313196,
+          0.10027093078684927,
+          -0.6731889322720388
+        ],
+        "rotation": [
+          -4.273092710496357,
+          22.111601537195085,
+          -3.8034236932080923
+        ],
+        "scale": [
+          0.032,
+          0.20054186157369855,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_18",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.11614386105264315,
+          0.5491939680618809,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.10883373068821212,
+          0.08030615938673988,
+          0.06443624411579285
+        ],
+        "rotation": [
+          -11.138746731051283,
+          47.65624050909241,
+          -4.406196529195949
+        ],
+        "scale": [
+          0.032,
+          0.16061231877347976,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_19",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.1978501242718973,
+          0.49505969936889516,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -1.526093692655206,
+          0.13339088740505498,
+          1.0921682603243448
+        ],
+        "rotation": [
+          -9.895128910825461,
+          4.867648455990334,
+          1.208827924699202
+        ],
+        "scale": [
+          0.032,
+          0.26678177481010995,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_20",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.17790548913381773,
+          0.49586663154871824,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          1.1626400969269404,
+          0.10133382366752344,
+          0.5316329289971642
+        ],
+        "rotation": [
+          -3.732405830686993,
+          138.94882351236564,
+          -9.322823033038583
+        ],
+        "scale": [
+          0.032,
+          0.20266764733504689,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_21",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.1739873020375714,
+          0.5472999297985671,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.5450720158471605,
+          0.1673813496128314,
+          -0.5093083191729927
+        ],
+        "rotation": [
+          13.57792941654494,
+          145.09414526142015,
+          9.873606364906493
+        ],
+        "scale": [
+          0.032,
+          0.3347626992256628,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_22",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.16925219417001236,
+          0.4466513853881962,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.8744336318989284,
+          0.11266750520259498,
+          0.1388051933357124
+        ],
+        "rotation": [
+          -13.188555779241769,
+          50.295337028825365,
+          -13.217761888182196
+        ],
+        "scale": [
+          0.032,
+          0.22533501040518997,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_23",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.1226845826730728,
+          0.43968321813932276,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          1.460848244292281,
+          0.1824425441531491,
+          -0.016099108913208315
+        ],
+        "rotation": [
+          13.665065629680086,
+          65.6344593651359,
+          12.74001767699733
+        ],
+        "scale": [
+          0.032,
+          0.3648850883062982,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_24",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.17996437448496602,
+          0.5175360477113816,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.9705402770581849,
+          0.1448879676925382,
+          -0.5503786007923093
+        ],
+        "rotation": [
+          11.208633460755198,
+          86.30521672707688,
+          9.532194763820115
+        ],
+        "scale": [
+          0.032,
+          0.2897759353850764,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_25",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.17891354310202764,
+          0.43213390930076323,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -1.3287088433587837,
+          0.17917325650620675,
+          0.45328843045076717
+        ],
+        "rotation": [
+          7.904480754746519,
+          86.04589402692004,
+          7.003932875252836
+        ],
+        "scale": [
+          0.032,
+          0.3583465130124135,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_26",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.11700036599718955,
+          0.5304637598141587,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -0.5359449604332482,
+          0.18659887467785902,
+          0.7618118515727204
+        ],
+        "rotation": [
+          -2.916522138055452,
+          170.42346116368074,
+          -2.761169099704359
+        ],
+        "scale": [
+          0.032,
+          0.37319774935571803,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "grass_27",
+      "shape": {
+        "type": "cube",
+        "side_length": 1.0
+      },
+      "material": {
+        "type": "diffuse",
+        "albedo": [
+          0.165726829273602,
+          0.5764550698204655,
+          0.08
+        ]
+      },
+      "transform": {
+        "translation": [
+          -1.1934772246468341,
+          0.17858225148798873,
+          -0.6674684591607224
+        ],
+        "rotation": [
+          8.582055496901493,
+          148.77188613456968,
+          -9.907119355171524
+        ],
+        "scale": [
+          0.032,
+          0.35716450297597746,
+          0.032
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "key_light",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "emissive",
+        "albedo": [
+          1.0,
+          0.92,
+          0.76
+        ],
+        "intensity": 42.0
+      },
+      "transform": {
+        "translation": [
+          -4.5,
+          7.0,
+          5.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "fill_light",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "emissive",
+        "albedo": [
+          0.72,
+          0.84,
+          1.0
+        ],
+        "intensity": 14.0
+      },
+      "transform": {
+        "translation": [
+          5.0,
+          3.5,
+          4.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.4,
+          0.4,
+          0.4
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    },
+    {
+      "name": "rim_light",
+      "shape": {
+        "type": "sphere",
+        "radius": 1.0
+      },
+      "material": {
+        "type": "emissive",
+        "albedo": [
+          0.88,
+          0.72,
+          1.0
+        ],
+        "intensity": 22.0
+      },
+      "transform": {
+        "translation": [
+          0.5,
+          6.0,
+          -5.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          0.35,
+          0.35,
+          0.35
+        ],
+        "shear": [
+          0,
+          0,
+          0
+        ],
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "rotation_order": "xyz"
+      },
+      "visible": true,
+      "renderable": true,
+      "selectable": true
+    }
+  ],
+  "lights": [],
+  "cameras": [
+    {
+      "name": "camera",
+      "position": [
+        2.2,
+        2.6,
+        5.2
+      ],
+      "forward": [
+        -0.26155662363004106,
+        -0.2428740076564667,
+        -0.934130798678718
+      ],
+      "up": [
+        -0.06548610059514996,
+        0.9700578417831004,
+        -0.23387893069696414
+      ],
+      "fov": 38,
+      "aspect_ratio": 1.0
+    }
+  ],
+  "background_color": [
+    0,
+    0,
+    0
+  ],
+  "use_sky": false
+}

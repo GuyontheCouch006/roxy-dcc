@@ -41,6 +41,15 @@ def schlick(cosine, eta):
     return r0 + (1.0 - r0) * (1.0 - cosine) ** 5
 
 @ti.func
+def glossy_scatter(rd, normal, roughness):
+    result = ti.Vector([0.0, 0.0, 0.0])
+    if ti.random() < roughness:
+        result = diffuse_scatter(normal)
+    else:
+        result = metal_scatter(rd, normal, roughness)
+    return result
+
+@ti.func
 def dielectric_scatter(rd, normal, eta):  # eta = n1/n2, already computed
     cos_theta = min(-rd.dot(normal), 1.0)
     sin_theta = ti.sqrt(1.0 - cos_theta * cos_theta)

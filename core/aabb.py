@@ -78,6 +78,7 @@ class AABB:
             (self.min.y + self.max.y) / 2,
             (self.min.z + self.max.z) / 2,
         )
+    
 
     def transform(self, matrix):
         """Return a new AABB that bounds all 8 transformed corners of this box."""
