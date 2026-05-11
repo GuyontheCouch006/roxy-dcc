@@ -1,3 +1,4 @@
+import core.timing as timing
 from core.aabb import AABB
 from core.vectors import Vec3
 
@@ -18,23 +19,17 @@ class GPUBVHBuilder:
         self.mat_palette     = []
         self._mat_key_to_idx = {}
 
+    @timing.timer("BVH build", tag="bvh")
     def build(self, tri_data_list):
-        """Build BVH from a list of triangle dicts.
-
-        Each dict has:
-            v0, v1, v2  – [x,y,z] world-space vertices
-            n0, n1, n2  – [x,y,z] vertex normals
-            mat_type    – int
-            albedo      – [r,g,b]
-            roughness   – float
-            ior         – float
-            emission    – float
-        """
+        """Build BVH from a list of triangle dicts."""
         self.nodes           = []
         self.ordered_tris    = []
         self._mat_key_to_idx = {}
         self.mat_palette     = []
         self._build_node(tri_data_list, depth=0)
+        if timing.LEVEL >= 1:
+            timing.defer_print(f"    {len(tri_data_list):,} tris → {len(self.nodes):,} nodes, "
+                               f"{len(self.mat_palette)} materials")
         return self
 
     def _build_node(self, tris, depth):
@@ -118,8 +113,9 @@ class GPUBVHBuilder:
             return 1
         return 2
 
+    @timing.timer("BVH upload", tag="bvh")
     def upload(self):
-        """Upload BVH nodes, triangles, and material palette to Taichi fields."""
+        """Upload BVH nodes, triangles, and material palette to Taichi fields via from_numpy."""
         from rendering.taichi.fields import (
             _bvh_aabb_min, _bvh_aabb_max, _bvh_left, _bvh_right,
             _bvh_tri_start, _bvh_tri_count, _bvh_n_nodes,
@@ -199,4 +195,6 @@ class GPUBVHBuilder:
             _mat_emission[i]  = mat['emission']
         _mat_n_mats[None] = n_mats
 
+        if timing.LEVEL >= 1:
+            timing.defer_print(f"    {n_nodes:,} nodes, {n_tris:,} tris → GPU")
         return self

@@ -1,3 +1,4 @@
+import core.timing as timing
 from rendering.taichi.fields import (
     _obj_type, _obj_center, _obj_radius,
     _obj_normal, _obj_offset, _obj_extra,
@@ -28,6 +29,7 @@ def _write_slot(i, data):
     _obj_emission[i]  = data['emission']
 
 
+@timing.timer("extract scene", tag="taichi")
 def extract_scene(world):
     from scene.mesh import IndexedMesh, Mesh
     from scene.primitives import Sphere, Plane, Cube

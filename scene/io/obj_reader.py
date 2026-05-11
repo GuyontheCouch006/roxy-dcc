@@ -1,8 +1,21 @@
 from pathlib import Path
 
+import core.timing as timing
 from scene.mesh import IndexedMesh, Mesh, Triangle
 from scene.materials import Diffuse
 from core import Vec3, Vec2, Color
+
+
+def _print_mesh_stats(root, via):
+    if timing.LEVEL < 1:
+        return
+    children = root.children
+    tris = sum(
+        len(s.geometry._triangles) if hasattr(s.geometry, '_triangles')
+        else (s.geometry.triangle_count if hasattr(s.geometry, 'triangle_count') else 0)
+        for c in children for s in c.shapes
+    )
+    timing.defer_print(f"    via {via} — {len(children)} meshes, {tris:,} tris")
 
 
 class OBJReader:
@@ -16,6 +29,7 @@ class OBJReader:
     INDEXED_AUTO_THRESHOLD_BYTES = 32 * 1024 * 1024
 
     @staticmethod
+    @timing.timer(tag="load", label_fn=lambda path, *_: Path(path).name)
     def load(path, name=None, indexed=None, build_bvh=False):
         """Load an OBJ file. Uses Assimp if available, falls back to pure Python."""
         file_path = Path(path)
@@ -26,8 +40,9 @@ class OBJReader:
             )
 
         if indexed:
-            print(f"  loaded via indexed Python parser")
-            return OBJReader._load_python_indexed(path, name, build_bvh=build_bvh)
+            result = OBJReader._load_python_indexed(path, name, build_bvh=build_bvh)
+            _print_mesh_stats(result, "indexed Python")
+            return result
 
         from scene.io.assimp_importer import AssimpImporter
 
@@ -36,15 +51,16 @@ class OBJReader:
                 result = AssimpImporter.load(path, name)
                 if result and result.children:
                     if OBJReader._obj_material_names_missing(path, result):
-                        print(f"  Assimp lost OBJ material groups, falling back to Python parser")
-                        return OBJReader._load_python(path, name)
-                    print(f"  loaded via Assimp")
-                    return result
+                        print(f"    Assimp lost material groups, falling back to Python parser")
+                    else:
+                        _print_mesh_stats(result, "Assimp")
+                        return result
             except Exception as e:
-                print(f"  Assimp failed ({e}), falling back to Python parser")
+                print(f"    Assimp failed ({e}), falling back to Python parser")
 
-        print(f"  loaded via Python parser")
-        return OBJReader._load_python(path, name)
+        result = OBJReader._load_python(path, name)
+        _print_mesh_stats(result, "Python")
+        return result
 
     @staticmethod
     def _load_python_indexed(path, name=None, build_bvh=False):

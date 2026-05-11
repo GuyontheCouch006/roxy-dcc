@@ -7,8 +7,10 @@
 # ============================================
 
 import math
+import time
 import taichi as ti
 
+import core.timing as timing
 from rendering.taichi import render_kernel, extract_scene
 from rendering.taichi.fields import _pixels, _frame_count
 
@@ -24,6 +26,13 @@ class TaichiRenderer:
         self._max_depth = max_depth
         self._camera    = world.active_camera
 
+    @timing.timer("first frame (JIT compile)", tag="taichi")
+    def _jit_frame(self, W, H, fov_tan, aspect, use_sky, bg_color,
+                   cam_pos, cam_fwd, cam_right, cam_up):
+        render_kernel(W, H, fov_tan, aspect, self._max_depth, use_sky, bg_color,
+                      cam_pos, cam_fwd, cam_right, cam_up)
+
+    @timing.timer("render", tag="render")
     def render(self):
         W, H = self._image.width, self._image.height
         cam  = self._camera
@@ -41,18 +50,30 @@ class TaichiRenderer:
         bg_color = list(world._background_color)
 
         extract_scene(world)
-        _frame_count[None] = 0  # reset accumulator
+        _frame_count[None] = 0
+
+        args = (W, H, fov_tan, aspect, use_sky, bg_color,
+                cam_pos, cam_fwd, cam_right, cam_up)
+
+        self._jit_frame(*args)
+        _frame_count[None] = 1
+        self._image.pixels[:] = _pixels.to_numpy()[:H, :W]
+        if self._viewport:
+            self._viewport.update(self._image)
+            self._viewport.poll_events()
 
         target_samples = self._samples
-        for frame in range(target_samples):
+        t_loop_start = time.perf_counter()
+        frames_rendered = 1
+
+        for frame in range(1, target_samples):
             if self._viewport and self._viewport.should_close:
                 break
-            
             render_kernel(W, H, fov_tan, aspect, self._max_depth, use_sky, bg_color,
-                        cam_pos, cam_fwd, cam_right, cam_up)
+                          cam_pos, cam_fwd, cam_right, cam_up)
             _frame_count[None] = frame + 1
+            frames_rendered = frame + 1
 
-            # copy to image and display every N frames
             if frame % 4 == 0 or frame == target_samples - 1:
                 self._image.pixels[:] = _pixels.to_numpy()[:H, :W]
                 if self._viewport:
@@ -61,9 +82,14 @@ class TaichiRenderer:
 
             print(f"\r  sample {frame+1}/{target_samples}", end='', flush=True)
 
+        if timing.LEVEL >= 1 and frames_rendered > 1:
+            print()
+            loop_elapsed = time.perf_counter() - t_loop_start
+            avg_ms = loop_elapsed / (frames_rendered - 1) * 1000
+            print(timing._fmt("render", f"{frames_rendered - 1} steady-state frames",
+                               loop_elapsed, f"avg {avg_ms:.1f} ms/frame"))
 
         self._image.pixels[:] = _pixels.to_numpy()[:H, :W]
-
         if self._viewport:
             self._viewport.update(self._image)
             while not self._viewport.should_close:

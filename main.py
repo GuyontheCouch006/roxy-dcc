@@ -1,11 +1,9 @@
-USE_TAICHI = True
-DEBUG = False
-
-if DEBUG:
-    import cProfile
-    import pstats
+USE_TAICHI  = True
+DEBUG_LEVEL = 1   # 0=off  1=milestone timers  2=timers + cProfile
 
 import random
+import core.timing as timing
+timing.LEVEL = DEBUG_LEVEL
 
 from core import Vec3, Color, Point3
 from rendering.taichi_renderer import TaichiRenderer
@@ -283,21 +281,31 @@ def build_glossy_test(W, H):
     world.add_camera(camera)
     return world
 
-
-def build_bicycle(W, H):
-    #OBJ = "sample_scenes/roadBike/roadBike.obj"
+def build_dragon(W, H):
     OBJ = "sample_scenes/dragon.obj"
     root = OBJReader.load(OBJ)
     debug_scene_object(root)
-    print (f'{root.world_aabb=}')
     root.rotation = Vec3(0,90,0)
-    #root.translation = Vec3(0,0.283058,0)
     root.scale = Vec3(2,2,2)
     aabb = root.world_aabb
     y = -aabb.min.y
     root.translation = Vec3(0, y, 0)
     root.children[0].material = Diffuse(Color(.5, .2, .14))
     world = World(use_sky=False)
+    world.add_object(root)
+
+    world.add_object(SceneObject(
+        shape=Plane(normal=Vec3(0, 1, 0)),
+        material=Glossy(Color(0.45, 0.45, 0.45), roughness=0.05),
+        name="ground",
+    ))
+
+def build_bicycle(W, H):
+    OBJ = "sample_scenes/roadBike/roadBike.obj"
+    root = OBJReader.load(OBJ)
+    debug_scene_object(root)
+    root.rotation = Vec3(0,-10,0)
+    world = World(use_sky=True)
     world.add_object(root)
 
     world.add_object(SceneObject(
@@ -342,7 +350,8 @@ def build_bicycle(W, H):
 def main():
     W, H = 1920, 1080
 
-    world = build_bicycle(W, H)
+    with timing.timed("build_bicycle", tag="scene"):
+        world = build_bicycle(W, H)
 
     image    = Image(W, H)
     viewport = GLViewport(W, H, "Road Bike")
@@ -352,13 +361,7 @@ def main():
     else:
         tracer = RayTracer(world, image, viewport, samples=128, max_depth=10)
 
-    if DEBUG:
-        with cProfile.Profile() as pr:
-            tracer.render()
-        stats = pstats.Stats(pr)
-        stats.sort_stats('cumulative')
-        stats.print_stats(20)
-    else:
+    with timing.profile("render"):
         tracer.render()
 
     while not viewport.should_close:

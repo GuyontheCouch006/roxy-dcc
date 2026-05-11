@@ -13,6 +13,9 @@ sample_scenes/gallery/gallery.obj
 sample_scenes/roadBike/roadBike.obj
 .DS_Store
 
+# Markdown docs
+*.md
+
 # Python
 __pycache__/
 *.py[codz]
