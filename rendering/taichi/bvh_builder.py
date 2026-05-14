@@ -1,6 +1,218 @@
+from dataclasses import dataclass
+
+import numpy as np
+
 import core.timing as timing
-from core.aabb import AABB
-from core.vectors import Vec3
+
+
+@dataclass
+class TriangleBatch:
+    """Array-backed triangle data for BVH construction."""
+
+    v0: np.ndarray
+    v1: np.ndarray
+    v2: np.ndarray
+    n0: np.ndarray
+    n1: np.ndarray
+    n2: np.ndarray
+    mat_type: np.ndarray
+    albedo: np.ndarray
+    roughness: np.ndarray
+    ior: np.ndarray
+    emission: np.ndarray
+    mat_idx: np.ndarray = None
+    mat_palette: list = None
+
+    def __post_init__(self):
+        self.v0 = self._vec3_array(self.v0)
+        self.v1 = self._vec3_array(self.v1)
+        self.v2 = self._vec3_array(self.v2)
+        self.n0 = self._vec3_array(self.n0)
+        self.n1 = self._vec3_array(self.n1)
+        self.n2 = self._vec3_array(self.n2)
+        self.mat_type = np.asarray(self.mat_type, dtype=np.int32).reshape((-1,))
+        self.albedo = self._vec3_array(self.albedo)
+        self.roughness = np.asarray(self.roughness, dtype=np.float32).reshape((-1,))
+        self.ior = np.asarray(self.ior, dtype=np.float32).reshape((-1,))
+        self.emission = np.asarray(self.emission, dtype=np.float32).reshape((-1,))
+
+        tri_lengths = {
+            len(self.v0), len(self.v1), len(self.v2),
+            len(self.n0), len(self.n1), len(self.n2),
+        }
+        if len(tri_lengths) != 1:
+            raise ValueError("TriangleBatch geometry arrays must all have the same length")
+
+        if self.mat_idx is None:
+            material_lengths = {
+                len(self.mat_type), len(self.albedo),
+                len(self.roughness), len(self.ior), len(self.emission),
+            }
+            if len(material_lengths) != 1 or next(iter(material_lengths)) != self.triangle_count:
+                raise ValueError("TriangleBatch per-triangle material arrays must match triangle count")
+        else:
+            self.mat_idx = np.asarray(self.mat_idx, dtype=np.int32).reshape((-1,))
+            if len(self.mat_idx) != self.triangle_count:
+                raise ValueError("TriangleBatch mat_idx must match triangle count")
+            palette_lengths = {
+                len(self.mat_type), len(self.albedo),
+                len(self.roughness), len(self.ior), len(self.emission),
+            }
+            if len(palette_lengths) != 1:
+                raise ValueError("TriangleBatch material palette arrays must all have the same length")
+            if self.mat_palette is None:
+                self.mat_palette = [
+                    {
+                        'type': int(self.mat_type[i]),
+                        'albedo': self.albedo[i].tolist(),
+                        'roughness': float(self.roughness[i]),
+                        'ior': float(self.ior[i]),
+                        'emission': float(self.emission[i]),
+                    }
+                    for i in range(len(self.mat_type))
+                ]
+
+    @staticmethod
+    def _vec3_array(value):
+        return np.asarray(value, dtype=np.float32).reshape((-1, 3))
+
+    @property
+    def triangle_count(self):
+        return len(self.v0)
+
+    @classmethod
+    def empty(cls):
+        return cls(
+            np.zeros((0, 3), dtype=np.float32),
+            np.zeros((0, 3), dtype=np.float32),
+            np.zeros((0, 3), dtype=np.float32),
+            np.zeros((0, 3), dtype=np.float32),
+            np.zeros((0, 3), dtype=np.float32),
+            np.zeros((0, 3), dtype=np.float32),
+            np.zeros(0, dtype=np.int32),
+            np.zeros((0, 3), dtype=np.float32),
+            np.zeros(0, dtype=np.float32),
+            np.zeros(0, dtype=np.float32),
+            np.zeros(0, dtype=np.float32),
+            mat_idx=np.zeros(0, dtype=np.int32),
+            mat_palette=[],
+        )
+
+    @classmethod
+    def from_dicts(cls, tris):
+        if not tris:
+            return cls.empty()
+        return cls(
+            [t['v0'] for t in tris],
+            [t['v1'] for t in tris],
+            [t['v2'] for t in tris],
+            [t['n0'] for t in tris],
+            [t['n1'] for t in tris],
+            [t['n2'] for t in tris],
+            [t['mat_type'] for t in tris],
+            [t['albedo'] for t in tris],
+            [t['roughness'] for t in tris],
+            [t['ior'] for t in tris],
+            [t['emission'] for t in tris],
+        )
+
+    @classmethod
+    def from_indexed_arrays(cls, arrays, material_by_group_idx):
+        group_idx = np.asarray(arrays['group_idx'], dtype=np.int32)
+        used_groups = np.unique(group_idx)
+        remap = np.zeros(max(int(used_groups.max()), 0) + 1, dtype=np.int32) if len(used_groups) else np.zeros(0, dtype=np.int32)
+        for local_idx, source_idx in enumerate(used_groups):
+            remap[int(source_idx)] = local_idx
+        local_group_idx = remap[group_idx] if len(used_groups) else group_idx
+        n_groups = len(used_groups)
+
+        mat_type_by_group = np.zeros(n_groups, dtype=np.int32)
+        albedo_by_group = np.zeros((n_groups, 3), dtype=np.float32)
+        roughness_by_group = np.zeros(n_groups, dtype=np.float32)
+        ior_by_group = np.ones(n_groups, dtype=np.float32)
+        emission_by_group = np.zeros(n_groups, dtype=np.float32)
+
+        for local_idx, source_idx in enumerate(used_groups):
+            mat = material_by_group_idx[int(source_idx)]
+            mat_type_by_group[local_idx] = mat['mat_type']
+            albedo_by_group[local_idx] = mat['albedo']
+            roughness_by_group[local_idx] = mat['roughness']
+            ior_by_group[local_idx] = mat['ior']
+            emission_by_group[local_idx] = mat['emission']
+        palette = [
+            {
+                'type': int(mat_type_by_group[i]),
+                'albedo': albedo_by_group[i].tolist(),
+                'roughness': float(roughness_by_group[i]),
+                'ior': float(ior_by_group[i]),
+                'emission': float(emission_by_group[i]),
+            }
+            for i in range(n_groups)
+        ]
+
+        return cls(
+            arrays['v0'],
+            arrays['v1'],
+            arrays['v2'],
+            arrays['n0'],
+            arrays['n1'],
+            arrays['n2'],
+            mat_type_by_group,
+            albedo_by_group,
+            roughness_by_group,
+            ior_by_group,
+            emission_by_group,
+            mat_idx=local_group_idx,
+            mat_palette=palette,
+        )
+
+    @classmethod
+    def concat(cls, batches):
+        batches = [b for b in batches if b.triangle_count]
+        if not batches:
+            return cls.empty()
+        if len(batches) == 1:
+            return batches[0]
+        if all(b.mat_idx is not None for b in batches):
+            palette = []
+            mat_idx = []
+            for batch in batches:
+                offset = len(palette)
+                palette.extend(batch.mat_palette)
+                mat_idx.append(batch.mat_idx + offset)
+            mat_type = np.asarray([m['type'] for m in palette], dtype=np.int32)
+            albedo = np.asarray([m['albedo'] for m in palette], dtype=np.float32).reshape((-1, 3))
+            roughness = np.asarray([m['roughness'] for m in palette], dtype=np.float32)
+            ior = np.asarray([m['ior'] for m in palette], dtype=np.float32)
+            emission = np.asarray([m['emission'] for m in palette], dtype=np.float32)
+            return cls(
+                np.concatenate([b.v0 for b in batches]),
+                np.concatenate([b.v1 for b in batches]),
+                np.concatenate([b.v2 for b in batches]),
+                np.concatenate([b.n0 for b in batches]),
+                np.concatenate([b.n1 for b in batches]),
+                np.concatenate([b.n2 for b in batches]),
+                mat_type,
+                albedo,
+                roughness,
+                ior,
+                emission,
+                mat_idx=np.concatenate(mat_idx),
+                mat_palette=palette,
+            )
+        return cls(
+            np.concatenate([b.v0 for b in batches]),
+            np.concatenate([b.v1 for b in batches]),
+            np.concatenate([b.v2 for b in batches]),
+            np.concatenate([b.n0 for b in batches]),
+            np.concatenate([b.n1 for b in batches]),
+            np.concatenate([b.n2 for b in batches]),
+            np.concatenate([b.mat_type for b in batches]),
+            np.concatenate([b.albedo for b in batches]),
+            np.concatenate([b.roughness for b in batches]),
+            np.concatenate([b.ior for b in batches]),
+            np.concatenate([b.emission for b in batches]),
+        )
 
 
 class GPUBVHBuilder:
@@ -10,61 +222,188 @@ class GPUBVHBuilder:
     Materials are deduplicated into a shared palette.
     """
 
-    MAX_LEAF_SIZE = 4
+    MAX_LEAF_SIZE = 8
     MAX_DEPTH     = 32
+    BUILD_METHOD  = "morton"
+    MORTON_BITS   = 10
 
     def __init__(self):
         self.nodes           = []
-        self.ordered_tris    = []
+        self.ordered_tris    = np.zeros(0, dtype=np.int32)
         self.mat_palette     = []
         self._mat_key_to_idx = {}
+        self._ordered_index_chunks = []
+        self._ordered_count = 0
+        self._batch = TriangleBatch.empty()
+        self._tri_bounds_min = np.zeros((0, 3), dtype=np.float32)
+        self._tri_bounds_max = np.zeros((0, 3), dtype=np.float32)
+        self._centroids = np.zeros((0, 3), dtype=np.float32)
+        self._source_mat_idx = np.zeros(0, dtype=np.int32)
+        self._ordered_v0 = np.zeros((0, 3), dtype=np.float32)
+        self._ordered_v1 = np.zeros((0, 3), dtype=np.float32)
+        self._ordered_v2 = np.zeros((0, 3), dtype=np.float32)
+        self._ordered_n0 = np.zeros((0, 3), dtype=np.float32)
+        self._ordered_n1 = np.zeros((0, 3), dtype=np.float32)
+        self._ordered_n2 = np.zeros((0, 3), dtype=np.float32)
+        self._ordered_mat_idx = np.zeros(0, dtype=np.int32)
+
+    @property
+    def triangle_count(self):
+        return len(self.ordered_tris)
 
     @timing.timer("BVH build", tag="bvh")
-    def build(self, tri_data_list):
-        """Build BVH from a list of triangle dicts."""
-        self.nodes           = []
-        self.ordered_tris    = []
-        self._mat_key_to_idx = {}
-        self.mat_palette     = []
-        self._build_node(tri_data_list, depth=0)
+    def build(self, tri_data, method=None):
+        """Build BVH from TriangleBatch objects or legacy triangle dicts."""
+        batches = self._coerce_batches(tri_data)
+        batch = TriangleBatch.concat(batches)
+        self._reset_for_build(batch)
+
+        if batch.triangle_count:
+            method = method or self.BUILD_METHOD
+            if method == "morton":
+                self._build_morton_bvh()
+            elif method == "median":
+                all_indices = np.arange(batch.triangle_count, dtype=np.int32)
+                self._build_median_node(all_indices, depth=0)
+            else:
+                raise ValueError(f"Unknown BVH build method: {method}")
+            self._finish_ordered_arrays()
+
         if timing.LEVEL >= 1:
-            timing.defer_print(f"    {len(tri_data_list):,} tris → {len(self.nodes):,} nodes, "
+            timing.defer_print(f"    {batch.triangle_count:,} tris → {len(self.nodes):,} nodes, "
                                f"{len(self.mat_palette)} materials")
         return self
 
-    def _build_node(self, tris, depth):
+    def _coerce_batches(self, tri_data):
+        if isinstance(tri_data, TriangleBatch):
+            return [tri_data]
+        if not tri_data:
+            return []
+        if all(isinstance(item, TriangleBatch) for item in tri_data):
+            return list(tri_data)
+        return [TriangleBatch.from_dicts(tri_data)]
+
+    def _reset_for_build(self, batch):
+        self.nodes = []
+        self.ordered_tris = np.zeros(0, dtype=np.int32)
+        self._ordered_index_chunks = []
+        self._ordered_count = 0
+        self._mat_key_to_idx = {}
+        self.mat_palette = []
+        self._batch = batch
+
+        if batch.triangle_count == 0:
+            self._tri_bounds_min = np.zeros((0, 3), dtype=np.float32)
+            self._tri_bounds_max = np.zeros((0, 3), dtype=np.float32)
+            self._centroids = np.zeros((0, 3), dtype=np.float32)
+            self._source_mat_idx = np.zeros(0, dtype=np.int32)
+            return
+
+        stacked = np.stack([batch.v0, batch.v1, batch.v2], axis=1)
+        eps = np.float32(1e-4)
+        self._tri_bounds_min = stacked.min(axis=1) - eps
+        self._tri_bounds_max = stacked.max(axis=1) + eps
+        self._centroids = (batch.v0 + batch.v1 + batch.v2) / np.float32(3.0)
+        self._source_mat_idx = self._build_material_indices(batch)
+
+    def _build_material_indices(self, batch):
+        if batch.mat_idx is not None:
+            remap = np.empty(len(batch.mat_palette), dtype=np.int32)
+            for i, mat in enumerate(batch.mat_palette):
+                remap[i] = self._get_or_add_material(mat)
+            return remap[batch.mat_idx]
+
+        mat_idx = np.empty(batch.triangle_count, dtype=np.int32)
+        for i in range(batch.triangle_count):
+            mat_idx[i] = self._get_or_add_material({
+                'mat_type': int(batch.mat_type[i]),
+                'albedo': batch.albedo[i].tolist(),
+                'roughness': float(batch.roughness[i]),
+                'ior': float(batch.ior[i]),
+                'emission': float(batch.emission[i]),
+            })
+        return mat_idx
+
+    def _get_or_add_material(self, mat):
+        mat_type = mat.get('mat_type', mat.get('type'))
+        key = (
+            int(mat_type),
+            tuple(float(v) for v in mat['albedo']),
+            float(mat['roughness']),
+            float(mat['ior']),
+            float(mat['emission']),
+        )
+        if key not in self._mat_key_to_idx:
+            self._mat_key_to_idx[key] = len(self.mat_palette)
+            self.mat_palette.append({
+                'type': key[0],
+                'albedo': list(key[1]),
+                'roughness': key[2],
+                'ior': key[3],
+                'emission': key[4],
+            })
+        return self._mat_key_to_idx[key]
+
+    def _build_morton_bvh(self):
+        order = self._morton_order()
+        self._build_morton_node(order, 0, len(order))
+
+    def _morton_order(self):
+        mins = self._centroids.min(axis=0)
+        maxs = self._centroids.max(axis=0)
+        extent = maxs - mins
+        extent[extent <= 1e-12] = 1.0
+
+        scale = np.float32((1 << self.MORTON_BITS) - 1)
+        normalized = np.clip((self._centroids - mins) / extent, 0.0, 1.0)
+        coords = (normalized * scale).astype(np.uint32)
+        codes = self._morton3(coords[:, 0], coords[:, 1], coords[:, 2])
+        return np.argsort(codes, kind='stable').astype(np.int32, copy=False)
+
+    @classmethod
+    def _morton3(cls, x, y, z):
+        return (
+            (cls._expand_morton_bits(x) << np.uint32(2))
+            | (cls._expand_morton_bits(y) << np.uint32(1))
+            | cls._expand_morton_bits(z)
+        )
+
+    @staticmethod
+    def _expand_morton_bits(v):
+        v = np.asarray(v, dtype=np.uint32) & np.uint32(0x000003ff)
+        v = (v | (v << np.uint32(16))) & np.uint32(0x030000ff)
+        v = (v | (v << np.uint32(8))) & np.uint32(0x0300f00f)
+        v = (v | (v << np.uint32(4))) & np.uint32(0x030c30c3)
+        v = (v | (v << np.uint32(2))) & np.uint32(0x09249249)
+        return v
+
+    def _build_morton_node(self, sorted_indices, start, end):
         node_idx = len(self.nodes)
-        self.nodes.append({})   # placeholder — filled below
+        self.nodes.append({})
 
-        aabb = self._compute_bounds(tris)
-
-        if len(tris) <= self.MAX_LEAF_SIZE or depth >= self.MAX_DEPTH:
-            tri_start = len(self.ordered_tris)
-            for tri in tris:
-                mat_idx = self._get_or_add_material(tri)
-                self.ordered_tris.append({**tri, 'mat_idx': mat_idx})
+        count = end - start
+        if count <= self.MAX_LEAF_SIZE:
+            tri_indices = sorted_indices[start:end]
+            aabb_min, aabb_max = self._compute_bounds(tri_indices)
+            tri_start = self._ordered_count
+            self._ordered_index_chunks.append(tri_indices)
+            self._ordered_count += count
             self.nodes[node_idx] = {
-                'aabb_min':  [aabb.min.x, aabb.min.y, aabb.min.z],
-                'aabb_max':  [aabb.max.x, aabb.max.y, aabb.max.z],
+                'aabb_min':  aabb_min,
+                'aabb_max':  aabb_max,
                 'left':      -1,
                 'right':     -1,
                 'tri_start': tri_start,
-                'tri_count': len(tris),
+                'tri_count': count,
             }
         else:
-            axis       = self._longest_axis(aabb)
-            tris_sorted = sorted(
-                tris,
-                key=lambda t: (t['v0'][axis] + t['v1'][axis] + t['v2'][axis]) / 3.0,
-            )
-            mid = len(tris_sorted) // 2
-
-            left_idx  = self._build_node(tris_sorted[:mid], depth + 1)
-            right_idx = self._build_node(tris_sorted[mid:], depth + 1)
-
+            mid = (start + end) // 2
+            left_idx = self._build_morton_node(sorted_indices, start, mid)
+            right_idx = self._build_morton_node(sorted_indices, mid, end)
+            aabb_min, aabb_max = self._combine_node_bounds(left_idx, right_idx)
             self.nodes[node_idx] = {
-                'aabb_min':  [aabb.min.x, aabb.min.y, aabb.min.z],
-                'aabb_max':  [aabb.max.x, aabb.max.y, aabb.max.z],
+                'aabb_min':  aabb_min,
+                'aabb_max':  aabb_max,
                 'left':      left_idx,
                 'right':     right_idx,
                 'tri_start': -1,
@@ -73,40 +412,76 @@ class GPUBVHBuilder:
 
         return node_idx
 
-    def _get_or_add_material(self, tri):
-        key = (
-            tri['mat_type'],
-            tuple(tri['albedo']),
-            tri['roughness'],
-            tri['ior'],
-            tri['emission'],
-        )
-        if key not in self._mat_key_to_idx:
-            idx = len(self.mat_palette)
-            self.mat_palette.append({
-                'type':      tri['mat_type'],
-                'albedo':    tri['albedo'],
-                'roughness': tri['roughness'],
-                'ior':       tri['ior'],
-                'emission':  tri['emission'],
-            })
-            self._mat_key_to_idx[key] = idx
-        return self._mat_key_to_idx[key]
-
-    def _compute_bounds(self, tris):
-        xs = [v[0] for t in tris for v in (t['v0'], t['v1'], t['v2'])]
-        ys = [v[1] for t in tris for v in (t['v0'], t['v1'], t['v2'])]
-        zs = [v[2] for t in tris for v in (t['v0'], t['v1'], t['v2'])]
-        eps = 1e-4
-        return AABB(
-            Vec3(min(xs) - eps, min(ys) - eps, min(zs) - eps),
-            Vec3(max(xs) + eps, max(ys) + eps, max(zs) + eps),
+    def _combine_node_bounds(self, left_idx, right_idx):
+        left = self.nodes[left_idx]
+        right = self.nodes[right_idx]
+        return (
+            np.minimum(left['aabb_min'], right['aabb_min']).tolist(),
+            np.maximum(left['aabb_max'], right['aabb_max']).tolist(),
         )
 
-    def _longest_axis(self, aabb):
-        ex = aabb.max.x - aabb.min.x
-        ey = aabb.max.y - aabb.min.y
-        ez = aabb.max.z - aabb.min.z
+    def _build_median_node(self, tri_indices, depth):
+        node_idx = len(self.nodes)
+        self.nodes.append({})   # placeholder — filled below
+
+        aabb_min, aabb_max = self._compute_bounds(tri_indices)
+
+        if len(tri_indices) <= self.MAX_LEAF_SIZE or depth >= self.MAX_DEPTH:
+            tri_start = self._ordered_count
+            self._ordered_index_chunks.append(tri_indices)
+            self._ordered_count += len(tri_indices)
+            self.nodes[node_idx] = {
+                'aabb_min':  aabb_min,
+                'aabb_max':  aabb_max,
+                'left':      -1,
+                'right':     -1,
+                'tri_start': tri_start,
+                'tri_count': len(tri_indices),
+            }
+        else:
+            axis = self._longest_axis(aabb_min, aabb_max)
+            mid = len(tri_indices) // 2
+            centroids = self._centroids[tri_indices, axis]
+            order = np.argpartition(centroids, mid)
+            partitioned_indices = tri_indices[order]
+
+            left_idx  = self._build_median_node(partitioned_indices[:mid], depth + 1)
+            right_idx = self._build_median_node(partitioned_indices[mid:], depth + 1)
+
+            self.nodes[node_idx] = {
+                'aabb_min':  aabb_min,
+                'aabb_max':  aabb_max,
+                'left':      left_idx,
+                'right':     right_idx,
+                'tri_start': -1,
+                'tri_count': 0,
+            }
+
+        return node_idx
+
+    def _finish_ordered_arrays(self):
+        if self._ordered_index_chunks:
+            self.ordered_tris = np.concatenate(self._ordered_index_chunks).astype(np.int32, copy=False)
+        else:
+            self.ordered_tris = np.zeros(0, dtype=np.int32)
+
+        order = self.ordered_tris
+        self._ordered_v0 = self._batch.v0[order]
+        self._ordered_v1 = self._batch.v1[order]
+        self._ordered_v2 = self._batch.v2[order]
+        self._ordered_n0 = self._batch.n0[order]
+        self._ordered_n1 = self._batch.n1[order]
+        self._ordered_n2 = self._batch.n2[order]
+        self._ordered_mat_idx = self._source_mat_idx[order]
+
+    def _compute_bounds(self, tri_indices):
+        return (
+            self._tri_bounds_min[tri_indices].min(axis=0).tolist(),
+            self._tri_bounds_max[tri_indices].max(axis=0).tolist(),
+        )
+
+    def _longest_axis(self, aabb_min, aabb_max):
+        ex, ey, ez = np.asarray(aabb_max) - np.asarray(aabb_min)
         if ex >= ey and ex >= ez:
             return 0
         if ey >= ez:
@@ -129,12 +504,10 @@ class GPUBVHBuilder:
 
         assert len(self.nodes) <= MAX_BVH_NODES, \
             f"BVH has {len(self.nodes)} nodes, limit is {MAX_BVH_NODES}"
-        assert len(self.ordered_tris) <= MAX_TRIANGLES, \
-            f"BVH has {len(self.ordered_tris)} triangles, limit is {MAX_TRIANGLES}"
+        assert self.triangle_count <= MAX_TRIANGLES, \
+            f"BVH has {self.triangle_count} triangles, limit is {MAX_TRIANGLES}"
         assert len(self.mat_palette) <= MAX_MATERIALS, \
             f"BVH has {len(self.mat_palette)} materials, limit is {MAX_MATERIALS}"
-
-        import numpy as np
 
         # from_numpy requires the array shape to exactly match the field shape,
         # so allocate full-capacity arrays and fill only the used prefix.
@@ -161,7 +534,7 @@ class GPUBVHBuilder:
         _bvh_tri_count.from_numpy(tri_count)
         _bvh_n_nodes[None] = n_nodes
 
-        n_tris  = len(self.ordered_tris)
+        n_tris  = self.triangle_count
         v0      = np.zeros((MAX_TRIANGLES, 3), dtype=np.float32)
         v1      = np.zeros((MAX_TRIANGLES, 3), dtype=np.float32)
         v2      = np.zeros((MAX_TRIANGLES, 3), dtype=np.float32)
@@ -169,14 +542,13 @@ class GPUBVHBuilder:
         n1      = np.zeros((MAX_TRIANGLES, 3), dtype=np.float32)
         n2      = np.zeros((MAX_TRIANGLES, 3), dtype=np.float32)
         mat_idx = np.zeros(MAX_TRIANGLES, dtype=np.int32)
-        for i, tri in enumerate(self.ordered_tris):
-            v0[i]      = tri['v0']
-            v1[i]      = tri['v1']
-            v2[i]      = tri['v2']
-            n0[i]      = tri['n0']
-            n1[i]      = tri['n1']
-            n2[i]      = tri['n2']
-            mat_idx[i] = tri['mat_idx']
+        v0[:n_tris] = self._ordered_v0
+        v1[:n_tris] = self._ordered_v1
+        v2[:n_tris] = self._ordered_v2
+        n0[:n_tris] = self._ordered_n0
+        n1[:n_tris] = self._ordered_n1
+        n2[:n_tris] = self._ordered_n2
+        mat_idx[:n_tris] = self._ordered_mat_idx
         _bvh_v0.from_numpy(v0)
         _bvh_v1.from_numpy(v1)
         _bvh_v2.from_numpy(v2)

@@ -7,10 +7,12 @@ MAX_H         = 1080
 MAX_BVH_NODES = 4_000_000   # 2× road-bike triangle count
 MAX_TRIANGLES = 2_000_000   # road-bike quads → ~1.68 M triangles
 MAX_MATERIALS = 4_096
+MAX_LIGHTS    = 4_096
 
 _pixels = ti.Vector.field(3, dtype=ti.f32, shape=(MAX_H, MAX_W))
 _accumulator = ti.Vector.field(3, dtype=ti.f32, shape=(MAX_H, MAX_W))
 _frame_count  = ti.field(dtype=ti.i32, shape=())
+_ray_count    = ti.field(dtype=ti.i32, shape=())
 
 _obj_type   = ti.field(dtype=ti.i32, shape=MAX_OBJECTS)
 _obj_center = ti.Vector.field(3, dtype=ti.f32, shape=MAX_OBJECTS)
@@ -31,6 +33,13 @@ _obj_ior       = ti.field(dtype=ti.f32, shape=MAX_OBJECTS)
 _obj_emission  = ti.field(dtype=ti.f32, shape=MAX_OBJECTS)  # emissive intensity, 0 otherwise
 
 _n_objects = ti.field(dtype=ti.i32, shape=())
+
+# ── Explicit light sampling ─────────────────────────────────────────────────
+_light_center   = ti.Vector.field(3, dtype=ti.f32, shape=MAX_LIGHTS)
+_light_radius   = ti.field(dtype=ti.f32, shape=MAX_LIGHTS)
+_light_albedo   = ti.Vector.field(3, dtype=ti.f32, shape=MAX_LIGHTS)
+_light_emission = ti.field(dtype=ti.f32, shape=MAX_LIGHTS)
+_n_lights       = ti.field(dtype=ti.i32, shape=())
 
 # ── BVH nodes ──────────────────────────────────────────────────────────────
 _bvh_aabb_min  = ti.Vector.field(3, dtype=ti.f32, shape=MAX_BVH_NODES)
@@ -58,4 +67,3 @@ _mat_roughness = ti.field(dtype=ti.f32,           shape=MAX_MATERIALS)
 _mat_ior       = ti.field(dtype=ti.f32,           shape=MAX_MATERIALS)
 _mat_emission  = ti.field(dtype=ti.f32,           shape=MAX_MATERIALS)
 _mat_n_mats    = ti.field(dtype=ti.i32,           shape=())
-

@@ -99,6 +99,65 @@ def bvh_intersect(ro, rd):
 
 
 @ti.func
+def bvh_occluded(ro, rd, max_t):
+    """Return 1 if any BVH triangle blocks the ray before max_t."""
+    occluded = 0
+
+    stack     = ti.Vector.zero(ti.i32, 64)
+    stack_ptr = 0
+    stack[0]  = 0
+
+    while stack_ptr >= 0 and occluded == 0:
+        node_idx  = stack[stack_ptr]
+        stack_ptr -= 1
+
+        if not aabb_hit(ro, rd, _bvh_aabb_min[node_idx], _bvh_aabb_max[node_idx]):
+            continue
+
+        if _bvh_tri_count[node_idx] > 0:
+            for i in range(_bvh_tri_start[node_idx],
+                           _bvh_tri_start[node_idx] + _bvh_tri_count[node_idx]):
+                t, u, v = bvh_triangle_intersect(
+                    ro, rd, _bvh_v0[i], _bvh_v1[i], _bvh_v2[i])
+                if 0.001 < t < max_t:
+                    occluded = 1
+        else:
+            stack_ptr += 1
+            stack[stack_ptr] = _bvh_left[node_idx]
+            stack_ptr += 1
+            stack[stack_ptr] = _bvh_right[node_idx]
+
+    return occluded
+
+
+@ti.func
+def scene_occluded(ro, rd, max_t):
+    """Any-hit shadow query. Returns 1 if a primitive or BVH tri blocks the ray."""
+    occluded = 0
+
+    n = _n_objects[None]
+    for i in range(n):
+        obj_t = -1.0
+
+        if _obj_type[i] == 0:
+            obj_t = Sphere.taichi_intersect(ro, rd, _obj_center[i], _obj_radius[i])
+        elif _obj_type[i] == 1:
+            obj_t = Plane.taichi_intersect(ro, rd, _obj_normal[i], _obj_offset[i])
+        elif _obj_type[i] == 2:
+            obj_t = Cube.taichi_intersect(ro, rd, _obj_center[i], _obj_extra[i])
+        elif _obj_type[i] == 4:
+            obj_t = Triangle.taichi_intersect(ro, rd, _obj_v0[i], _obj_v1[i], _obj_v2[i])
+
+        if 0.001 < obj_t < max_t:
+            occluded = 1
+
+    if occluded == 0 and _bvh_n_tris[None] > 0:
+        occluded = bvh_occluded(ro, rd, max_t)
+
+    return occluded
+
+
+@ti.func
 def scene_intersect(ro, rd):
     closest_t      = 1e9
     closest_normal = ti.Vector([0.0, 1.0, 0.0])

@@ -156,6 +156,35 @@ class SceneObject:
 
         return closest
 
+    def occluded(self, world_ray, max_t):
+        """Return True if this node blocks world_ray before max_t."""
+        if not self._renderable:
+            return False
+
+        if self._can_use_aabb_early_out():
+            if not self.world_aabb.intersect(world_ray):
+                return False
+
+        inv = self.world_inverse_matrix
+        local_origin    = inv.transform_point(world_ray._origin)
+        local_direction = inv.transform_vector(world_ray._direction)
+        local_ray       = Ray(local_origin, local_direction)
+
+        M = self.world_matrix
+        for shape in self._shapes:
+            hit = shape.geometry.intersect(local_ray)
+            if hit is not None:
+                world_point = M.transform_point(local_ray.at(hit.t))
+                world_t = (world_point - world_ray._origin).dot(world_ray._direction)
+                if 0.001 < world_t < max_t:
+                    return True
+
+        for child in self._children:
+            if child.occluded(world_ray, max_t):
+                return True
+
+        return False
+
     def _can_use_aabb_early_out(self):
         if not self._shapes and not self._children:
             return False

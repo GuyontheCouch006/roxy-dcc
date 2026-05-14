@@ -356,10 +356,23 @@ def main():
     image    = Image(W, H)
     viewport = GLViewport(W, H, "Road Bike")
 
+    world.use_sky = False
     if USE_TAICHI:
-        tracer = TaichiRenderer(world, image, viewport, samples=6000, max_depth=12)
+        tracer = TaichiRenderer(
+            world, image, viewport,
+            samples=3000,
+            max_depth=12,
+            direct_light_mode="all",
+            denoise=True,
+        )
     else:
-        tracer = RayTracer(world, image, viewport, samples=128, max_depth=10)
+        tracer = RayTracer(
+            world, image, viewport,
+            samples=128,
+            max_depth=10,
+            direct_light_mode="all",
+            denoise=True,
+        )
 
     with timing.profile("render"):
         tracer.render()

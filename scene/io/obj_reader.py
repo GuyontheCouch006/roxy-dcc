@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import numpy as np
 import core.timing as timing
 from scene.mesh import IndexedMesh, Mesh, Triangle
 from scene.materials import Diffuse
@@ -9,13 +10,20 @@ from core import Vec3, Vec2, Color
 def _print_mesh_stats(root, via):
     if timing.LEVEL < 1:
         return
-    children = root.children
+
+    def iter_nodes(node):
+        for child in node.children:
+            yield child
+            yield from iter_nodes(child)
+
+    nodes = list(iter_nodes(root))
     tris = sum(
         len(s.geometry._triangles) if hasattr(s.geometry, '_triangles')
         else (s.geometry.triangle_count if hasattr(s.geometry, 'triangle_count') else 0)
-        for c in children for s in c.shapes
+        for c in nodes for s in c.shapes
     )
-    timing.defer_print(f"    via {via} — {len(children)} meshes, {tris:,} tris")
+    meshes = sum(1 for c in nodes for s in c.shapes)
+    timing.defer_print(f"    via {via} — {meshes} meshes, {tris:,} tris")
 
 
 class OBJReader:
@@ -64,19 +72,153 @@ class OBJReader:
 
     @staticmethod
     def _load_python_indexed(path, name=None, build_bvh=False):
-        """Load an OBJ hierarchy with one IndexedMesh child.
+        """Load an OBJ hierarchy with IndexedMesh leaves.
 
         Unlike _load_python(), this keeps vertices/normals/UVs in shared arrays and
-        stores each triangle as index rows plus a material-group id.
+        stores each triangle as index rows plus a material-group id. OBJ `o` and `g`
+        records become SceneObject hierarchy nodes; material runs become mesh leaves.
         """
         from scene.scene_object import SceneObject
         from scene.shape import Shape as ShapeNode
+        from scene.io.mtl_loader import MTLLoader
 
         file_path = Path(path)
         root = SceneObject(name=name or file_path.stem)
-        mesh, mat_groups = OBJReader._parse_indexed(path, build_bvh=build_bvh)
-        shape = ShapeNode(mesh, mat_groups, name=file_path.stem)
-        root.add_child(SceneObject(shapes=[shape], name=file_path.stem))
+        positions, normals, uvs = [], [], []
+        mtl_materials = {}
+        group_names, group_to_idx = [], {}
+
+        current_obj_node = root
+        current_group_node = root
+        current_mtl = 'default'
+
+        pending_pos_idx = []
+        pending_normal_idx = []
+        pending_uv_idx = []
+        pending_group_idx = []
+        pending_groups = set()
+        leaves = []
+
+        def _idx(raw, length):
+            i = int(raw)
+            return i - 1 if i > 0 else length + i
+
+        def group_id(name):
+            if name not in group_to_idx:
+                group_to_idx[name] = len(group_names)
+                group_names.append(name)
+            return group_to_idx[name]
+
+        current_gid = group_id(current_mtl)
+
+        def flush():
+            nonlocal pending_pos_idx, pending_normal_idx, pending_uv_idx
+            nonlocal pending_group_idx, pending_groups
+
+            if not pending_pos_idx:
+                return
+
+            leaves.append({
+                "parent": current_group_node,
+                "name": current_mtl,
+                "tri_pos_idx": pending_pos_idx,
+                "tri_normal_idx": pending_normal_idx,
+                "tri_uv_idx": pending_uv_idx,
+                "tri_group_idx": pending_group_idx,
+                "groups": pending_groups,
+            })
+
+            pending_pos_idx = []
+            pending_normal_idx = []
+            pending_uv_idx = []
+            pending_group_idx = []
+            pending_groups = set()
+
+        with open(file_path, 'r') as f:
+            for line in f:
+                parts = line.split()
+                if not parts or parts[0].startswith('#'):
+                    continue
+                token = parts[0]
+
+                if token == 'mtllib':
+                    mtl_path = file_path.parent / parts[1]
+                    if mtl_path.exists():
+                        raw = MTLLoader.load(str(mtl_path))
+                        mtl_materials.update({n: m.to_material() for n, m in raw.items()})
+                elif token == 'v':
+                    positions.append([float(parts[1]), float(parts[2]), float(parts[3])])
+                elif token == 'vn':
+                    normals.append([float(parts[1]), float(parts[2]), float(parts[3])])
+                elif token == 'vt':
+                    uvs.append([float(parts[1]), float(parts[2])])
+                elif token == 'o':
+                    flush()
+                    obj_name = parts[1] if len(parts) > 1 else 'object'
+                    current_obj_node = SceneObject(name=obj_name)
+                    root.add_child(current_obj_node)
+                    current_group_node = current_obj_node
+                elif token == 'g':
+                    flush()
+                    group_name = parts[1] if len(parts) > 1 else 'group'
+                    current_group_node = SceneObject(name=group_name)
+                    current_obj_node.add_child(current_group_node)
+                elif token == 'usemtl':
+                    new_mtl = parts[1] if len(parts) > 1 else 'default'
+                    if new_mtl != current_mtl:
+                        flush()
+                    current_mtl = new_mtl
+                    current_gid = group_id(current_mtl)
+                elif token == 'f':
+                    face = parts[1:]
+                    vi, ni, uvi = [], [], []
+                    for part in face:
+                        vals = part.split('/')
+                        vi.append(_idx(vals[0], len(positions)))
+                        uvi.append(_idx(vals[1], len(uvs)) if len(vals) > 1 and vals[1] else -1)
+                        ni.append(_idx(vals[2], len(normals)) if len(vals) > 2 and vals[2] else -1)
+                    for i in range(1, len(vi) - 1):
+                        pending_pos_idx.append([vi[0], vi[i], vi[i + 1]])
+                        pending_uv_idx.append([uvi[0], uvi[i], uvi[i + 1]])
+                        pending_normal_idx.append([ni[0], ni[i], ni[i + 1]])
+                        pending_group_idx.append(current_gid)
+                        pending_groups.add(current_mtl)
+                elif token in ('s',):
+                    continue
+                else:
+                    print(f"Warning: Unrecognized OBJ token: {token!r}")
+
+        flush()
+        positions_arr = np.asarray(positions, dtype=np.float64).reshape((-1, 3))
+        normals_arr = (
+            np.asarray(normals, dtype=np.float64).reshape((-1, 3))
+            if normals else None
+        )
+        uvs_arr = (
+            np.asarray(uvs, dtype=np.float64).reshape((-1, 2))
+            if uvs else None
+        )
+
+        for leaf in leaves:
+            mesh = IndexedMesh(
+                positions_arr,
+                leaf["tri_pos_idx"],
+                normals=normals_arr,
+                tri_normal_idx=leaf["tri_normal_idx"],
+                uvs=uvs_arr,
+                tri_uv_idx=leaf["tri_uv_idx"],
+                groups=group_names or ['default'],
+                tri_group_idx=leaf["tri_group_idx"],
+                name=leaf["name"],
+                build_bvh=build_bvh,
+            )
+            mat_groups = {
+                group: mtl_materials.get(group, Diffuse(Color(0.8, 0.8, 0.8)))
+                for group in (leaf["groups"] or {'default'})
+            }
+            shape = ShapeNode(mesh, mat_groups, name=leaf["name"])
+            leaf["parent"].add_child(SceneObject(shapes=[shape], name=leaf["name"]))
+
         return root
 
     @staticmethod

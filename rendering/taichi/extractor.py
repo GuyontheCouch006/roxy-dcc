@@ -6,6 +6,8 @@ from rendering.taichi.fields import (
     _obj_roughness, _obj_ior, _obj_emission,
     _obj_v0, _obj_v1, _obj_v2,
     _n_objects, MAX_OBJECTS,
+    _light_center, _light_radius, _light_albedo, _light_emission,
+    _n_lights, MAX_LIGHTS,
     _bvh_n_nodes, _bvh_n_tris, _mat_n_mats,
 )
 
@@ -29,13 +31,32 @@ def _write_slot(i, data):
     _obj_emission[i]  = data['emission']
 
 
+def _upload_lights(primitive_slots):
+    lights = [
+        data for data in primitive_slots
+        if data['type'] == 0 and data['mat_type'] == 3 and data['emission'] > 0.0
+    ]
+    assert len(lights) <= MAX_LIGHTS, (
+        f"Scene has {len(lights)} emissive sphere lights but MAX_LIGHTS={MAX_LIGHTS}"
+    )
+
+    _n_lights[None] = len(lights)
+    for i, data in enumerate(lights):
+        _light_center[i]   = data['center']
+        _light_radius[i]   = data['radius']
+        _light_albedo[i]   = data['albedo']
+        _light_emission[i] = data['emission']
+
+
 @timing.timer("extract scene", tag="taichi")
 def extract_scene(world):
-    from scene.mesh import IndexedMesh, Mesh
+    from scene.mesh import IndexedMesh, Mesh, indexed_triangle_arrays
     from scene.primitives import Sphere, Plane, Cube
+    from rendering.taichi.bvh_builder import GPUBVHBuilder, TriangleBatch
 
     primitive_slots = []
     mesh_tri_data   = []
+    mesh_batches    = []
 
     def _collect(obj):
         if not obj.renderable:
@@ -79,16 +100,14 @@ def extract_scene(world):
                         'emission':  params[0] if mt == 3 else 0.0,
                     })
             elif isinstance(geo, IndexedMesh):
-                M     = obj.world_matrix
-                inv_T = obj.world_inverse_transpose_matrix
+                arrays = indexed_triangle_arrays(
+                    geo,
+                    matrix=obj.world_matrix,
+                    normal_matrix=obj.world_inverse_transpose_matrix,
+                )
+                mat_by_group_idx = {}
 
-                def _xn(n):
-                    return list(inv_T.transform_vector(n).normalize())
-
-                for tri_i in range(geo.triangle_count):
-                    v0, v1, v2 = geo.triangle_vertices(tri_i)
-                    n0, n1, n2 = geo.triangle_normals(tri_i)
-                    group = geo.group_for_triangle(tri_i)
+                for group_idx, group in enumerate(arrays['groups']):
                     mat = shape.material_for_group(group)
                     if mat is None:
                         from scene.materials import Diffuse
@@ -97,17 +116,15 @@ def extract_scene(world):
 
                     mt     = mat.taichi_type_id()
                     params = mat.taichi_params()
-                    mesh_tri_data.append({
-                        'v0': list(M.transform_point(v0)),
-                        'v1': list(M.transform_point(v1)),
-                        'v2': list(M.transform_point(v2)),
-                        'n0': _xn(n0), 'n1': _xn(n1), 'n2': _xn(n2),
+                    mat_by_group_idx[group_idx] = {
                         'mat_type':  mt,
                         'albedo':    list(mat._albedo),
                         'roughness': params[0] if mt in (1, 4) else 0.0,
                         'ior':       params[0] if mt == 2 else 1.0,
                         'emission':  params[0] if mt == 3 else 0.0,
-                    })
+                    }
+
+                mesh_batches.append(TriangleBatch.from_indexed_arrays(arrays, mat_by_group_idx))
             else:
                 # Primitive (Sphere, Plane, Cube, or legacy Triangle slot)
                 exported = obj.taichi_export()
@@ -129,21 +146,38 @@ def extract_scene(world):
     _n_objects[None] = n
     for i, data in enumerate(primitive_slots):
         _write_slot(i, data)
+    _upload_lights(primitive_slots)
 
     # ── Build and upload BVH for mesh triangles ───────────────────────────────
-    if mesh_tri_data:
+    mesh_tri_count = len(mesh_tri_data) + sum(batch.triangle_count for batch in mesh_batches)
+    if mesh_tri_count:
         import sys
-        sys.setrecursionlimit(max(sys.getrecursionlimit(), len(mesh_tri_data) * 2))
+        sys.setrecursionlimit(max(sys.getrecursionlimit(), mesh_tri_count * 2))
 
-        from rendering.taichi.bvh_builder import GPUBVHBuilder
+        if mesh_tri_data:
+            mesh_batches.append(TriangleBatch.from_dicts(mesh_tri_data))
         builder = GPUBVHBuilder()
-        print(f"  BVH: building from {len(mesh_tri_data):,} triangles …")
-        builder.build(mesh_tri_data)
+        print(f"  BVH: building from {mesh_tri_count:,} triangles …")
+        builder.build(mesh_batches)
         builder.upload()
         print(f"  BVH: {len(builder.nodes):,} nodes, "
-              f"{len(builder.ordered_tris):,} triangles, "
+              f"{builder.triangle_count:,} triangles, "
               f"{len(builder.mat_palette)} materials")
+        return {
+            'primitive_count': n,
+            'bvh_nodes': len(builder.nodes),
+            'bvh_triangles': builder.triangle_count,
+            'bvh_materials': len(builder.mat_palette),
+            'bvh_leaf_size': builder.MAX_LEAF_SIZE,
+        }
     else:
         _bvh_n_nodes[None] = 0
         _bvh_n_tris[None]  = 0
         _mat_n_mats[None]  = 0
+        return {
+            'primitive_count': n,
+            'bvh_nodes': 0,
+            'bvh_triangles': 0,
+            'bvh_materials': 0,
+            'bvh_leaf_size': 0,
+        }

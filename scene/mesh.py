@@ -394,6 +394,35 @@ class IndexedMesh(Shape):
     def group_for_triangle(self, tri_i):
         return self._groups[int(self._tri_group_idx[tri_i])]
 
+    def indexed_triangle_arrays(self, matrix=None, normal_matrix=None, dtype=np.float32):
+        """Return renderer-ready triangle arrays without creating Triangle objects.
+
+        The returned arrays are shaped for one row per triangle:
+            v0/v1/v2, n0/n1/n2: (triangle_count, 3)
+            group_idx:          (triangle_count,)
+
+        If matrix and normal_matrix are provided, vertices and normals are returned
+        in that transformed space. This lets SceneObject keep owning transforms
+        while mesh storage remains shared and local.
+        """
+        tri_vertices = self._positions[self._tri_pos_idx]
+        tri_vertices = self._transform_points_array(tri_vertices, matrix)
+
+        tri_normals = self._indexed_normal_array()
+        tri_normals = self._transform_vectors_array(tri_normals, normal_matrix)
+        tri_normals = self._normalize_rows(tri_normals.reshape((-1, 3))).reshape((-1, 3, 3))
+
+        return {
+            'v0': tri_vertices[:, 0, :].astype(dtype, copy=False),
+            'v1': tri_vertices[:, 1, :].astype(dtype, copy=False),
+            'v2': tri_vertices[:, 2, :].astype(dtype, copy=False),
+            'n0': tri_normals[:, 0, :].astype(dtype, copy=False),
+            'n1': tri_normals[:, 1, :].astype(dtype, copy=False),
+            'n2': tri_normals[:, 2, :].astype(dtype, copy=False),
+            'group_idx': self._tri_group_idx.astype(np.int32, copy=False),
+            'groups': list(self._groups),
+        }
+
     def intersect(self, ray):
         hit = self._bvh.intersect(self, ray) if self._bvh else self._brute_force_intersect(ray)
         if hit is None:
@@ -477,6 +506,59 @@ class IndexedMesh(Shape):
         v0, v1, v2 = self.triangle_vertices(tri_i)
         return (v1 - v0).cross(v2 - v0).normalize()
 
+    def _indexed_normal_array(self):
+        if self.triangle_count == 0:
+            return np.zeros((0, 3, 3), dtype=np.float64)
+
+        tri_vertices = self._positions[self._tri_pos_idx]
+        e1 = tri_vertices[:, 1, :] - tri_vertices[:, 0, :]
+        e2 = tri_vertices[:, 2, :] - tri_vertices[:, 0, :]
+        face_normals = self._normalize_rows(np.cross(e1, e2))
+        tri_normals = np.repeat(face_normals[:, None, :], 3, axis=1)
+
+        if self._normals is None:
+            return tri_normals
+
+        valid = np.all(self._tri_normal_idx >= 0, axis=1)
+        if np.any(valid):
+            tri_normals[valid] = self._normals[self._tri_normal_idx[valid]]
+        return tri_normals
+
+    @staticmethod
+    def _matrix_array(matrix):
+        return None if matrix is None else np.asarray(matrix.rows, dtype=np.float64)
+
+    @classmethod
+    def _transform_points_array(cls, points, matrix):
+        out = np.asarray(points, dtype=np.float64)
+        m = cls._matrix_array(matrix)
+        if m is None:
+            return out.copy()
+
+        flat = out.reshape((-1, 3))
+        transformed = flat @ m[:3, :3].T + m[:3, 3]
+        w = flat @ m[3, :3].T + m[3, 3]
+        needs_divide = np.abs(w) > 1e-12
+        transformed[needs_divide] /= w[needs_divide, None]
+        return transformed.reshape(out.shape)
+
+    @classmethod
+    def _transform_vectors_array(cls, vectors, matrix):
+        out = np.asarray(vectors, dtype=np.float64)
+        m = cls._matrix_array(matrix)
+        if m is None:
+            return out.copy()
+        flat = out.reshape((-1, 3))
+        return (flat @ m[:3, :3].T).reshape(out.shape)
+
+    @staticmethod
+    def _normalize_rows(rows):
+        lengths = np.linalg.norm(rows, axis=1)
+        out = rows.copy()
+        valid = lengths > 1e-12
+        out[valid] /= lengths[valid, None]
+        return out
+
     @staticmethod
     def _vec3(row):
         return Vec3(float(row[0]), float(row[1]), float(row[2]))
@@ -522,3 +604,14 @@ class IndexedMesh(Shape):
         )
 
     def taichi_type_id(self): return 6
+
+
+def indexed_triangle_arrays(mesh, matrix=None, normal_matrix=None, dtype=np.float32):
+    """Return triangle arrays for an IndexedMesh.
+
+    Kept as a tiny public helper so renderer code can use the same name whether
+    this later becomes a cache, view object, or shared mesh-buffer API.
+    """
+    if not isinstance(mesh, IndexedMesh):
+        raise TypeError("indexed_triangle_arrays expects an IndexedMesh")
+    return mesh.indexed_triangle_arrays(matrix, normal_matrix, dtype=dtype)

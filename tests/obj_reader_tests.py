@@ -33,6 +33,14 @@ def _all_triangles(root):
         tris.extend(_all_triangles(child))
     return tris
 
+def _all_shape_nodes(root):
+    nodes = []
+    for child in root.children:
+        if child.shapes:
+            nodes.append(child)
+        nodes.extend(_all_shape_nodes(child))
+    return nodes
+
 
 # ── load_as_mesh: basic loading ──────────────────────────────────────────────
 
@@ -268,10 +276,36 @@ def test_load_indexed_hierarchy_has_indexed_mesh_and_material_groups():
     path = _write_obj(obj)
     try:
         root = OBJReader.load(path, indexed=True)
-        assert len(root.children) == 1
-        shape = root.children[0].shapes[0]
-        assert isinstance(shape.geometry, IndexedMesh)
-        assert set(shape.material_groups.keys()) == {"matA", "matB"}
+        assert [c.name for c in root.children] == ["matA", "matB"]
+        leaves = _all_shape_nodes(root)
+        assert len(leaves) == 2
+        assert all(isinstance(leaf.shapes[0].geometry, IndexedMesh) for leaf in leaves)
+        assert [set(leaf.shapes[0].material_groups.keys()) for leaf in leaves] == [
+            {"matA"},
+            {"matB"},
+        ]
+    finally:
+        _cleanup(path)
+
+def test_load_indexed_preserves_object_and_group_nodes():
+    obj = (
+        "o BikeFrame\n"
+        "g FrontTriangle\n"
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\n"
+        "usemtl matA\nf 1 2 3\n"
+        "g RearTriangle\n"
+        "v 0 0 1\nv 1 0 1\nv 0 1 1\n"
+        "usemtl matB\nf 4 5 6\n"
+    )
+    path = _write_obj(obj)
+    try:
+        root = OBJReader.load(path, indexed=True)
+        assert [c.name for c in root.children] == ["BikeFrame"]
+        obj_node = root.children[0]
+        assert [c.name for c in obj_node.children] == ["FrontTriangle", "RearTriangle"]
+        assert obj_node.children[0].children[0].name == "matA"
+        assert obj_node.children[1].children[0].name == "matB"
+        assert isinstance(obj_node.children[0].children[0].shapes[0].geometry, IndexedMesh)
     finally:
         _cleanup(path)
 
@@ -296,5 +330,6 @@ if __name__ == "__main__":
         test_load_usemtl_produces_named_child,
         test_load_two_usemtl_produce_two_children,
         test_load_indexed_hierarchy_has_indexed_mesh_and_material_groups,
+        test_load_indexed_preserves_object_and_group_nodes,
     ]
     run_tests(tests)

@@ -1,6 +1,8 @@
 import taichi as ti
+import os
 
-ti.init(arch=ti.gpu)
+_ARCH = os.environ.get("RAY_TRACER_TAICHI_ARCH", "gpu").lower()
+ti.init(arch=ti.cpu if _ARCH == "cpu" else ti.gpu)
 
 from rendering.taichi.fields import _pixels, _n_objects, MAX_W, MAX_H, MAX_OBJECTS  # noqa: E402
 from rendering.taichi.sky import sky_color  # noqa: E402

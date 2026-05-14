@@ -68,6 +68,13 @@ class World:
     # ─── Properties ───────────────────────────────────────────────────────────
 
     @property
+    def use_sky(self): return self._use_sky
+
+    @use_sky.setter
+    def use_sky(self, status):
+        self._use_sky = status
+
+    @property
     def objects(self): return self._objects
 
     @property
@@ -106,6 +113,15 @@ class World:
             if hit and (closest is None or hit < closest):
                 closest = hit
         return closest
+
+    def occluded(self, ray, max_t):
+        """Return True if any renderable object blocks ray before max_t."""
+        for obj in self._objects:
+            if not obj.renderable:
+                continue
+            if obj.occluded(ray, max_t):
+                return True
+        return False
 
     def sky_color(self, ray):
         """Return the background color for a ray that hit nothing.

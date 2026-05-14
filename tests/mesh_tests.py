@@ -1,5 +1,5 @@
-from scene.mesh import IndexedMesh, Triangle, Mesh
-from core import Vec2, Vec3, Ray
+from scene.mesh import IndexedMesh, Triangle, Mesh, indexed_triangle_arrays
+from core import Vec2, Vec3, Ray, Mat4x4
 from tests.utils import run_tests, approx_eq, vec3_approx_eq
 
 
@@ -231,6 +231,31 @@ def test_indexed_mesh_round_trip_dict():
     assert hit is not None
     assert hit.group == "near"
 
+def test_indexed_triangle_arrays_apply_transform_once():
+    mesh = _indexed_mesh()
+    arrays = indexed_triangle_arrays(
+        mesh,
+        matrix=Mat4x4.translation(10, 20, 30),
+        normal_matrix=Mat4x4.identity(),
+    )
+    assert arrays['v0'].shape == (2, 3)
+    assert approx_eq(arrays['v0'][0][0], 10.0)
+    assert approx_eq(arrays['v0'][0][1], 20.0)
+    assert approx_eq(arrays['v0'][0][2], 31.0)
+    assert approx_eq(arrays['v1'][1][0], 11.0)
+    assert arrays['groups'] == ["near", "far"]
+    assert arrays['group_idx'][1] == 1
+
+def test_indexed_triangle_arrays_fallback_normals():
+    mesh = IndexedMesh(
+        positions=[[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+        tri_pos_idx=[[0, 1, 2]],
+    )
+    arrays = indexed_triangle_arrays(mesh)
+    assert approx_eq(arrays['n0'][0][2], 1.0)
+    assert approx_eq(arrays['n1'][0][2], 1.0)
+    assert approx_eq(arrays['n2'][0][2], 1.0)
+
 
 if __name__ == "__main__":
     tests = [
@@ -258,5 +283,7 @@ if __name__ == "__main__":
         test_indexed_mesh_bounds_union,
         test_indexed_mesh_from_triangles_preserves_group_and_uvs,
         test_indexed_mesh_round_trip_dict,
+        test_indexed_triangle_arrays_apply_transform_once,
+        test_indexed_triangle_arrays_fallback_normals,
     ]
     run_tests(tests)
