@@ -40,3 +40,22 @@ def random_unit_vector():
     v = np.random.normal(0, 1, 3)
     v = v / np.linalg.norm(v)
     return Vec3(float(v[0]), float(v[1]), float(v[2]))
+
+
+def random_cosine_hemisphere(normal):
+    """Sample a cosine-weighted direction around the supplied surface normal."""
+    r1 = float(np.random.random())
+    r2 = float(np.random.random())
+    phi = 2.0 * math.pi * r1
+    r = math.sqrt(r2)
+
+    local_x = math.cos(phi) * r
+    local_y = math.sin(phi) * r
+    local_z = math.sqrt(max(0.0, 1.0 - r2))
+
+    w = normal.normalize()
+    helper = Vec3(0, 1, 0) if abs(w.x) > 0.9 else Vec3(1, 0, 0)
+    v = w.cross(helper).normalize()
+    u = v.cross(w)
+
+    return (u * local_x + v * local_y + w * local_z).normalize()

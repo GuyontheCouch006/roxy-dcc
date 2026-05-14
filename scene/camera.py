@@ -36,7 +36,7 @@ class Camera:
         self._aspect_ratio = width / height if height != 0 else 1.0
         self.name = name
 
-    def shoot(self, x, y, width, height):
+    def shoot(self, x, y, width, height, jitter=None):
         """Generate a ray through pixel (x, y) in screen space.
 
         Converts the pixel to NDC in [-1, 1], scales by FOV and aspect ratio,
@@ -44,8 +44,9 @@ class Camera:
         """
         assert abs(width/height - self._aspect_ratio) < 0.01, \
             f"Image dimensions {width}x{height} don't match camera aspect ratio {self._aspect_ratio:.3f}"
-        u = (x + 0.5) / width * 2 - 1
-        v = 1 - (y + 0.5) / height * 2
+        jitter_x, jitter_y = jitter if jitter is not None else (0.5, 0.5)
+        u = (x + jitter_x) / width * 2 - 1
+        v = 1 - (y + jitter_y) / height * 2
         half_fov = math.tan(math.radians(self._fov) / 2)
         ndc_x = u * self._aspect_ratio * half_fov
         ndc_y = v * half_fov

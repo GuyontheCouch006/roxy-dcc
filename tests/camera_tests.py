@@ -87,6 +87,12 @@ def test_shoot_direction_is_unit():
     ray = cam.shoot(50, 50, W, H)
     assert approx_eq(ray.direction.length(), 1.0)
 
+def test_shoot_center_jitter_matches_default():
+    cam = _camera()
+    centered = cam.shoot(50, 50, W, H)
+    jittered = cam.shoot(50, 50, W, H, jitter=(0.5, 0.5))
+    assert vec3_approx_eq(centered.direction, jittered.direction)
+
 def test_shoot_top_left_points_up_left():
     cam = _camera()
     ray = cam.shoot(0, 0, W, H)
@@ -148,6 +154,7 @@ if __name__ == "__main__":
         test_get_ray_returns_ray,
         test_shoot_returns_ray,
         test_shoot_direction_is_unit,
+        test_shoot_center_jitter_matches_default,
         test_shoot_top_left_points_up_left,
         test_shoot_bottom_right_points_down_right,
         test_shoot_wider_fov_deviates_more,

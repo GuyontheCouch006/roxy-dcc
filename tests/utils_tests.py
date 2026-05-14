@@ -7,7 +7,11 @@
 # ============================================
 
 import math
-from core.utils import safe_div, clamp, lerp, degrees_to_radians, radians_to_degrees, random_unit_vector
+from core import Vec3
+from core.utils import (
+    safe_div, clamp, lerp, degrees_to_radians, radians_to_degrees,
+    random_unit_vector, random_cosine_hemisphere,
+)
 from tests.utils import run_tests, approx_eq
 
 
@@ -106,6 +110,20 @@ def test_random_unit_vector_varies():
     assert len(unique) > 1
 
 
+def test_random_cosine_hemisphere_is_unit_length():
+    normal = Vec3(0, 1, 0)
+    for _ in range(10):
+        v = random_cosine_hemisphere(normal)
+        assert approx_eq(v.length(), 1.0, eps=1e-5)
+
+
+def test_random_cosine_hemisphere_stays_above_surface():
+    normal = Vec3(0, 1, 0)
+    for _ in range(10):
+        v = random_cosine_hemisphere(normal)
+        assert v.dot(normal) >= 0.0
+
+
 if __name__ == "__main__":
     tests = [
         test_safe_div_normal,
@@ -132,5 +150,7 @@ if __name__ == "__main__":
         test_degrees_radians_roundtrip,
         test_random_unit_vector_is_unit_length,
         test_random_unit_vector_varies,
+        test_random_cosine_hemisphere_is_unit_length,
+        test_random_cosine_hemisphere_stays_above_surface,
     ]
     run_tests(tests)

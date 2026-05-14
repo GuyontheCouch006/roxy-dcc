@@ -6,11 +6,13 @@ import numpy as np
 from core import Color, Point3, Ray
 from rendering.denoise import edge_aware_denoise, linear_to_display
 from rendering.render_stats import RenderStats
+from rendering.sampling import clamp_color_sample, pixel_sample_offset
 
 _worker_world  = None
 _worker_camera = None
 _worker_lights = None
 _worker_direct_light_mode = None
+_worker_sample_clamp = None
 
 
 @dataclass(frozen=True)
@@ -21,12 +23,14 @@ class _SphereLight:
     intensity: float
 
 
-def _init_worker(world, camera, lights, direct_light_mode):
-    global _worker_world, _worker_camera, _worker_lights, _worker_direct_light_mode
+def _init_worker(world, camera, lights, direct_light_mode, sample_clamp):
+    global _worker_world, _worker_camera, _worker_lights
+    global _worker_direct_light_mode, _worker_sample_clamp
     _worker_world  = world
     _worker_camera = camera
     _worker_lights = lights
     _worker_direct_light_mode = direct_light_mode
+    _worker_sample_clamp = sample_clamp
 
 
 def _iter_objects(objects):
@@ -140,14 +144,18 @@ def _trace(ray, world, max_depth, lights=None, direct_light_mode="one", depth=0)
 
 def _trace_band_worker(args):
     """One sample per pixel, returns raw linear colors (no gamma)."""
-    y_start, y_end, width, height, max_depth = args
+    y_start, y_end, width, height, max_depth, frame = args
     band = np.zeros((y_end - y_start, width, 3), dtype=np.float32)
     rays_cast = 0
     for y in range(y_start, y_end):
         for x in range(width):
-            ray = _worker_camera.shoot(x, y, width, height)
+            ray = _worker_camera.shoot(
+                x, y, width, height,
+                jitter=pixel_sample_offset(x, y, frame),
+            )
             c, ray_count = _trace(
                 ray, _worker_world, max_depth, _worker_lights, _worker_direct_light_mode)
+            c = clamp_color_sample(c, _worker_sample_clamp)
             rays_cast += ray_count
             band[y - y_start, x] = (c[0], c[1], c[2])
     return y_start, band, rays_cast
@@ -156,7 +164,8 @@ def _trace_band_worker(args):
 class RayTracer:
     def __init__(self, world, image, viewport, samples=64, max_depth=8, threaded=True,
                  direct_light_mode="one", denoise=False,
-                 denoise_radius=1, denoise_sigma=0.08, denoise_amount=0.8):
+                 denoise_radius=1, denoise_sigma=0.08, denoise_amount=0.8,
+                 sample_clamp=10.0):
         self._world     = world
         self._image     = image
         self._viewport  = viewport
@@ -171,6 +180,7 @@ class RayTracer:
         self._denoise_radius = denoise_radius
         self._denoise_sigma = denoise_sigma
         self._denoise_amount = denoise_amount
+        self._sample_clamp = sample_clamp
         self._last_ray_count = 0
         self._last_stats = None
         self._lights = _collect_emissive_sphere_lights(world)
@@ -192,10 +202,14 @@ class RayTracer:
             frames_rendered = frame + 1
             for y in range(H):
                 for x in range(W):
-                    ray = self._camera.shoot(x, y, W, H)
+                    ray = self._camera.shoot(
+                        x, y, W, H,
+                        jitter=pixel_sample_offset(x, y, frame),
+                    )
                     c, ray_count = _trace(
                         ray, self._world, self._max_depth, self._lights,
                         self._direct_light_mode)
+                    c = clamp_color_sample(c, self._sample_clamp)
                     rays_cast += ray_count
                     accum[y, x] = (accum[y, x] * frame + [c[0], c[1], c[2]]) / (frame + 1)
 
@@ -221,7 +235,7 @@ class RayTracer:
         frames_rendered = 0
         render_start = time.perf_counter()
 
-        tasks = [
+        band_ranges = [
             (y, min(y + band_size, H), W, H, self._max_depth)
             for y in range(0, H, band_size)
         ]
@@ -229,10 +243,14 @@ class RayTracer:
         with Pool(
             processes=10,
             initializer=_init_worker,
-            initargs=(self._world, self._camera, self._lights, self._direct_light_mode),
+            initargs=(
+                self._world, self._camera, self._lights,
+                self._direct_light_mode, self._sample_clamp,
+            ),
         ) as pool:
             for frame in range(self._samples):
                 frames_rendered = frame + 1
+                tasks = [(*band, frame) for band in band_ranges]
                 for y_start, band, band_rays in pool.imap_unordered(_trace_band_worker, tasks):
                     rays_cast += band_rays
                     y_end = y_start + len(band)

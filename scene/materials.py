@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from math import sqrt
 import random
 
-from core.utils import random_unit_vector
+from core.utils import random_unit_vector, random_cosine_hemisphere
 from core import Ray, Color
 
 def schlick(cos_theta, ior):
@@ -49,7 +49,7 @@ class Diffuse(Material):
     def taichi_params(self): return []
 
     def scatter(self, ray_in, hit_record):
-        scatter_direction = hit_record.normal + random_unit_vector()
+        scatter_direction = random_cosine_hemisphere(hit_record.normal)
         if scatter_direction.length_sq() < 1e-8:
             scatter_direction = hit_record.normal
         scattered_ray = Ray(hit_record.point, scatter_direction)

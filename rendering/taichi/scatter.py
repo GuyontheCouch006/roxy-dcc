@@ -12,8 +12,27 @@ def random_unit_vector():
 
 
 @ti.func
+def cosine_hemisphere(normal):
+    r1 = ti.random()
+    r2 = ti.random()
+    phi = 2.0 * math.pi * r1
+    r = ti.sqrt(r2)
+    local_x = ti.cos(phi) * r
+    local_y = ti.sin(phi) * r
+    local_z = ti.sqrt(ti.max(0.0, 1.0 - r2))
+
+    helper = ti.Vector([1.0, 0.0, 0.0])
+    if ti.abs(normal[0]) > 0.9:
+        helper = ti.Vector([0.0, 1.0, 0.0])
+
+    bitangent = normal.cross(helper).normalized()
+    tangent = bitangent.cross(normal)
+    return (tangent * local_x + bitangent * local_y + normal * local_z).normalized()
+
+
+@ti.func
 def diffuse_scatter(normal):
-    s = normal + random_unit_vector()
+    s = cosine_hemisphere(normal)
     if s.dot(s) < 1e-8:
         s = normal
     return s.normalized()
