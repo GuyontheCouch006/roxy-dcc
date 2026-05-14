@@ -53,6 +53,23 @@ class TaichiRenderer:
                       self._direct_light_mode_id, bg_color,
                       cam_pos, cam_fwd, cam_right, cam_up)
 
+    @timing.timer("denoise", tag="render")
+    def _denoised_pixels(self, W, H):
+        linear_pixels = _accumulator.to_numpy()[:H, :W]
+        linear_pixels = edge_aware_denoise(
+            linear_pixels,
+            radius=self._denoise_radius,
+            sigma_color=self._denoise_sigma,
+            amount=self._denoise_amount,
+        )
+        return linear_to_display(linear_pixels)
+
+    def _copy_display_pixels(self, W, H, apply_denoise=False):
+        if apply_denoise and self._denoise:
+            self._image.pixels[:] = self._denoised_pixels(W, H)
+        else:
+            self._image.pixels[:] = _pixels.to_numpy()[:H, :W]
+
     @timing.timer("render", tag="render")
     def render(self):
         W, H = self._image.width, self._image.height
@@ -82,17 +99,7 @@ class TaichiRenderer:
         self._jit_frame(*args)
         total_rays_cast += int(_ray_count[None])
         _frame_count[None] = 1
-        if self._denoise:
-            linear_pixels = _accumulator.to_numpy()[:H, :W]
-            linear_pixels = edge_aware_denoise(
-                linear_pixels,
-                radius=self._denoise_radius,
-                sigma_color=self._denoise_sigma,
-                amount=self._denoise_amount,
-            )
-            self._image.pixels[:] = linear_to_display(linear_pixels)
-        else:
-            self._image.pixels[:] = _pixels.to_numpy()[:H, :W]
+        self._copy_display_pixels(W, H)
         if self._viewport:
             self._viewport.update(self._image)
             self._viewport.poll_events()
@@ -127,7 +134,7 @@ class TaichiRenderer:
             print(timing._fmt("render", f"{frames_rendered - 1} steady-state frames",
                                loop_elapsed, f"avg {avg_ms:.1f} ms/frame"))
 
-        self._image.pixels[:] = _pixels.to_numpy()[:H, :W]
+        self._copy_display_pixels(W, H, apply_denoise=True)
         self._last_ray_count = total_rays_cast
         self._last_stats = RenderStats(
             width=W,
