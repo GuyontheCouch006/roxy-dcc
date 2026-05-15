@@ -422,9 +422,8 @@ def main():
             max_depth=8,
             direct_light_mode="all",
             denoise=True,
+            startup_progress=progress,
         )
-        progress.step("Starting render")
-        progress.close()
 
     try:
         with timing.profile("render"):
