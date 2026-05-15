@@ -26,7 +26,8 @@ class TaichiRenderer:
     def __init__(self, world, image, viewport, samples=16, max_depth=4,
                  direct_light_mode="one", denoise=False,
                  denoise_radius=1, denoise_sigma=0.08, denoise_amount=0.8,
-                 sample_clamp=10.0, direct_light_max_depth=1):
+                 sample_clamp=10.0, direct_light_max_depth=1,
+                 startup_progress=None):
         self._world     = world
         self._image     = image
         self._viewport  = viewport
@@ -45,6 +46,7 @@ class TaichiRenderer:
         self._camera    = world.active_camera
         self._last_ray_count = 0
         self._last_stats = None
+        self._startup_progress = startup_progress
 
     @staticmethod
     def _direct_light_mode_to_id(mode):
@@ -100,6 +102,11 @@ class TaichiRenderer:
         bg_color = list(world._background_color)
         render_start = time.perf_counter()
 
+        if self._startup_progress:
+            self._startup_progress.step(
+                "Extracting scene for GPU",
+                "Flattening objects, materials, lights, and textures.",
+            )
         scene_stats = extract_scene(world)
         _frame_count[None] = 0
         total_rays_cast = 0
@@ -107,9 +114,17 @@ class TaichiRenderer:
         args = (W, H, fov_tan, aspect, use_sky, bg_color,
                 cam_pos, cam_fwd, cam_right, cam_up)
 
+        if self._startup_progress:
+            self._startup_progress.step(
+                "Compiling first GPU frame",
+                "Taichi is preparing kernels and uploading render buffers.",
+            )
         if timing.LEVEL >= 1:
             _ray_count[None] = 0
         self._jit_frame(*args)
+        if self._startup_progress:
+            self._startup_progress.close()
+            self._startup_progress = None
         if timing.LEVEL >= 1:
             total_rays_cast += int(_ray_count[None])
         _frame_count[None] = 1

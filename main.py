@@ -13,6 +13,7 @@ from scene.materials import Emissive, Metal, Glossy
 from rendering import Image, GLViewport
 from scene.io import load_scene
 from scene.io.obj_reader import OBJReader
+from rendering.startup_progress import StartupProgress
 
 
 def build_rabbit():
@@ -347,11 +348,17 @@ def build_bicycle(W, H):
     return world
 
 
-def build_gallery(W, H):
+def build_gallery(W, H, progress=None):
     OBJ = "sample_scenes/gallery/gallery.obj"
+    if progress:
+        progress.step("Loading gallery mesh", OBJ)
     root = OBJReader.load(OBJ)
+    if progress:
+        progress.step("Inspecting gallery hierarchy")
     debug_scene_object(root)
 
+    if progress:
+        progress.step("Building scene objects", "Adding gallery geometry and ceiling lights.")
     world = World(use_sky=False)
     world.add_object(root)
 
@@ -380,13 +387,24 @@ def build_gallery(W, H):
 
 def main():
     W, H = int(1920), int(1080)
+    progress = StartupProgress(
+        "Roxy startup",
+        total_steps=9 if USE_TAICHI else 8,
+    )
 
+    progress.step("Starting Roxy", f"Preparing {W} x {H} render.")
     with timing.timed("build_gallery", tag="scene"):
-        world = build_gallery(W, H)
+        world = build_gallery(W, H, progress)
 
+    progress.step("Allocating image buffer")
     image    = Image(W, H)
+    progress.step("Opening viewport", "Creating the OpenGL preview window.")
     viewport = GLViewport(W, H, "Picture Gallery – Hallwyl Museum")
 
+    progress.step(
+        "Preparing renderer",
+        "Taichi GPU renderer" if USE_TAICHI else "Python path tracer",
+    )
     if USE_TAICHI:
         tracer = TaichiRenderer(
             world, image, viewport,
@@ -395,6 +413,7 @@ def main():
             direct_light_max_depth=1,
             direct_light_mode="one",
             denoise=True,
+            startup_progress=progress,
         )
     else:
         tracer = RayTracer(
@@ -404,9 +423,14 @@ def main():
             direct_light_mode="all",
             denoise=True,
         )
+        progress.step("Starting render")
+        progress.close()
 
-    with timing.profile("render"):
-        tracer.render()
+    try:
+        with timing.profile("render"):
+            tracer.render()
+    finally:
+        progress.close()
 
     while not viewport.should_close:
         viewport.poll_events()
