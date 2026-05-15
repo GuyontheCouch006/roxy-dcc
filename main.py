@@ -1,18 +1,34 @@
-USE_TAICHI  = True
-DEBUG_LEVEL = 1   # 0=off  1=milestone timers  2=timers + cProfile
+RENDER_BACKEND = "embree"  # "embree", "taichi", or "python"
+DEBUG_LEVEL = 0   # 0=off  1=milestone timers  2=timers + cProfile
 
 import random
 import core.timing as timing
 timing.LEVEL = DEBUG_LEVEL
 
 from core import Vec3, Color, Point3
-from rendering.taichi_renderer import TaichiRenderer
 from rendering.ray_tracer import RayTracer
 from scene import Sphere, Plane, Cube, Diffuse, SceneObject, World, Camera
 from scene.materials import Emissive, Metal, Glossy
 from rendering import Image, GLViewport
 from scene.io import load_scene
 from scene.io.obj_reader import OBJReader
+from rendering.startup_progress import StartupProgress
+
+
+def _startup_steps():
+    if RENDER_BACKEND in ("embree", "taichi"):
+        return 9
+    return 8
+
+
+def _renderer_label():
+    if RENDER_BACKEND == "embree":
+        return "Embree direct-light preview"
+    if RENDER_BACKEND == "taichi":
+        return "Taichi GPU renderer"
+    if RENDER_BACKEND == "python":
+        return "Python path tracer"
+    raise ValueError("RENDER_BACKEND must be 'embree', 'taichi', or 'python'")
 
 
 def build_rabbit():
@@ -347,35 +363,116 @@ def build_bicycle(W, H):
     return world
 
 
+def build_gallery(W, H, progress=None):
+    OBJ = "sample_scenes/gallery/gallery.obj"
+    if progress:
+        progress.step("Loading gallery mesh", OBJ)
+    root = OBJReader.load(
+        OBJ,
+        progress=progress.update if progress else None,
+    )
+    if progress:
+        progress.step("Inspecting gallery hierarchy")
+    debug_scene_object(root)
+
+    if progress:
+        progress.step("Building scene objects", "Adding gallery geometry and ceiling lights.")
+    world = World(use_sky=False)
+    world.add_object(root)
+
+    # Gallery bounding box: X -6.2→5.0, Y 0.06→6.26, Z -14.0→11.4
+    # Warm overhead strip lights along the central axis just below the ceiling
+    warm_white = Color(1.00, 0.96, 0.88)
+    for z in range(-12, 10, 4):
+        world.add_object(SceneObject(
+            shape=Sphere(1.0),
+            material=Emissive(warm_white, intensity=25.0),
+            translation=Vec3(-0.6, 5.7, float(z)),
+            scale=Vec3(0.25, 0.25, 0.25),
+            name=f"ceiling_light_{z}",
+        ))
+
+    camera = Camera(
+        position=Point3(-0.9, 1.7, 9.0),
+        forward=Vec3(0.0, -0.05, -1.0),
+        fov=70,
+        width=W,
+        height=H,
+    )
+    world.add_camera(camera)
+    return world
+
+
 def main():
-    W, H = 1920, 1080
+    W, H = int(1920), int(1080)
+    progress = StartupProgress(
+        "Roxy startup",
+        total_steps=_startup_steps(),
+    )
 
-    with timing.timed("build_bicycle", tag="scene"):
-        world = build_bicycle(W, H)
+    progress.step("Starting Roxy", f"Preparing {W} x {H} render.")
+    with timing.timed("build_gallery", tag="scene"):
+        world = build_gallery(W, H, progress)
 
+    progress.step("Allocating image buffer")
     image    = Image(W, H)
-    viewport = GLViewport(W, H, "Road Bike")
+    progress.step("Opening viewport", "Creating the OpenGL preview window.")
+    viewport = GLViewport(W, H, "Picture Gallery – Hallwyl Museum")
 
-    world.use_sky = False
-    if USE_TAICHI:
+    progress.step(
+        "Preparing renderer",
+        _renderer_label(),
+    )
+    if RENDER_BACKEND == "taichi":
+        from rendering.taichi_renderer import TaichiRenderer
+
         tracer = TaichiRenderer(
             world, image, viewport,
-            samples=3000,
-            max_depth=12,
-            direct_light_mode="all",
+            samples=2000,
+            max_depth=5,
+            direct_light_max_depth=1,
+            direct_light_mode="one",
             denoise=True,
+            startup_progress=progress,
+        )
+    elif RENDER_BACKEND == "embree":
+        from rendering.intersector import EmbreeIntersector, EmbreeUnavailableError
+        from rendering.embree_preview_renderer import EmbreePreviewRenderer
+
+        progress.step(
+            "Building Embree scene",
+            "Flattening mesh triangles and creating the Embree accelerator.",
+        )
+        try:
+            intersector = EmbreeIntersector(world)
+        except EmbreeUnavailableError:
+            progress.close()
+            raise
+
+        print(
+            f"  Embree: {intersector.triangle_count:,} triangles "
+            f"via {intersector.backend_name}"
+        )
+        tracer = EmbreePreviewRenderer(
+            world, image, viewport,
+            intersector=intersector,
+            startup_progress=progress,
         )
     else:
         tracer = RayTracer(
             world, image, viewport,
-            samples=128,
-            max_depth=10,
+            samples=64,
+            max_depth=8,
             direct_light_mode="all",
             denoise=True,
+            startup_progress=progress,
         )
 
-    with timing.profile("render"):
-        tracer.render()
+    try:
+        with timing.profile("render"):
+            tracer.render()
+    finally:
+        progress.close()
 
     while not viewport.should_close:
         viewport.poll_events()

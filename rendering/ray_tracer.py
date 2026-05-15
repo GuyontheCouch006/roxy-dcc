@@ -301,7 +301,7 @@ class RayTracer:
                  sample_clamp=10.0, adaptive_sampling=False,
                  adaptive_min_samples=4, adaptive_threshold=0.002,
                  adaptive_check_interval=1, direct_light_max_depth=1,
-                 intersector=None):
+                 intersector=None, startup_progress=None):
         self._world     = world
         self._image     = image
         self._viewport  = viewport
@@ -336,6 +336,7 @@ class RayTracer:
         self._last_ray_count = 0
         self._last_stats = None
         self._lights = _collect_emissive_sphere_lights(world)
+        self._startup_progress = startup_progress
 
     def render(self):
         self._adaptive_stopped = False
@@ -355,6 +356,13 @@ class RayTracer:
         frames_rendered = 0
         render_start = time.perf_counter()
         previous_accum = None
+        last_viewport_update = 0.0
+        first_viewport_update = False
+        if self._startup_progress:
+            self._startup_progress.step(
+                "Tracing first rows",
+                "The viewport will update as soon as the first rows finish.",
+            )
 
         for frame in range(self._samples):
             frames_rendered = frame + 1
@@ -381,6 +389,23 @@ class RayTracer:
                     depth_accum[y, x] = (
                         depth_accum[y, x] * frame + depth_value
                     ) / (frame + 1)
+
+                self._image.pixels[y:y+1] = np.sqrt(np.minimum(accum[y:y+1], 1.0))
+                now = time.perf_counter()
+                if (
+                    self._viewport
+                    and (not first_viewport_update or now - last_viewport_update >= 0.25)
+                ):
+                    self._viewport.update(self._image)
+                    self._viewport.poll_events()
+                    if not first_viewport_update:
+                        self._close_startup_progress()
+                    first_viewport_update = True
+                    last_viewport_update = now
+                    if self._viewport.should_close:
+                        self._apply_final_pixels(accum, normal_accum, albedo_accum, depth_accum)
+                        self._finish_stats(W, H, frames_rendered, rays_cast, render_start)
+                        return
 
             self._image.pixels[:] = np.sqrt(np.minimum(accum, 1.0))
             should_stop = self._adaptive_should_stop(previous_accum, accum, frames_rendered)
@@ -413,6 +438,13 @@ class RayTracer:
         frames_rendered = 0
         render_start = time.perf_counter()
         previous_accum = None
+        last_viewport_update = 0.0
+        first_viewport_update = False
+        if self._startup_progress:
+            self._startup_progress.step(
+                "Tracing first bands",
+                "The viewport will update as soon as the first worker band finishes.",
+            )
 
         band_ranges = [
             (y, min(y + band_size, H), W, H, self._max_depth)
@@ -449,6 +481,33 @@ class RayTracer:
                     self._image.pixels[y_start:y_end] = np.sqrt(
                         np.minimum(accum[y_start:y_end], 1.0)
                     )
+                    now = time.perf_counter()
+                    if (
+                        self._viewport
+                        and (not first_viewport_update or now - last_viewport_update >= 0.25)
+                    ):
+                        self._viewport.update(self._image)
+                        self._viewport.poll_events()
+                        if not first_viewport_update:
+                            self._close_startup_progress()
+                        first_viewport_update = True
+                        last_viewport_update = now
+                        if self._viewport.should_close:
+                            pool.terminate()
+                            self._apply_final_pixels(
+                                accum,
+                                normal_accum,
+                                albedo_accum,
+                                depth_accum,
+                            )
+                            self._finish_stats(
+                                W,
+                                H,
+                                frames_rendered,
+                                rays_cast,
+                                render_start,
+                            )
+                            return
 
                 should_stop = self._adaptive_should_stop(previous_accum, accum, frames_rendered)
                 previous_accum = self._adaptive_snapshot(accum)
@@ -469,6 +528,11 @@ class RayTracer:
 
         self._apply_final_pixels(accum, normal_accum, albedo_accum, depth_accum)
         self._finish_stats(W, H, frames_rendered, rays_cast, render_start)
+
+    def _close_startup_progress(self):
+        if self._startup_progress:
+            self._startup_progress.close()
+            self._startup_progress = None
 
     def _adaptive_snapshot(self, accum):
         if not self._adaptive_sampling:

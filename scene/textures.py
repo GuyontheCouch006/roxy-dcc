@@ -95,6 +95,35 @@ class ImageTexture:
         c = c0 * (1.0 - ty) + c1 * ty
         return Color(float(c[0]), float(c[1]), float(c[2]))
 
+    def sample_many(self, uvs):
+        pixels = self._load_pixels()
+        h, w = pixels.shape[:2]
+        uvs = np.asarray(uvs, dtype=np.float32).reshape((-1, 2))
+        if h == 0 or w == 0:
+            return np.ones((len(uvs), 3), dtype=np.float32)
+
+        u = np.mod(uvs[:, 0], 1.0)
+        v = np.mod(uvs[:, 1], 1.0)
+        if self.flip_v:
+            v = 1.0 - v
+
+        x = u * float(w - 1)
+        y = v * float(h - 1)
+        x0 = np.floor(x).astype(np.int32)
+        y0 = np.floor(y).astype(np.int32)
+        x1 = np.minimum(x0 + 1, w - 1)
+        y1 = np.minimum(y0 + 1, h - 1)
+        tx = (x - x0).reshape((-1, 1))
+        ty = (y - y0).reshape((-1, 1))
+
+        c00 = pixels[y0, x0]
+        c10 = pixels[y0, x1]
+        c01 = pixels[y1, x0]
+        c11 = pixels[y1, x1]
+        c0 = c00 * (1.0 - tx) + c10 * tx
+        c1 = c01 * (1.0 - tx) + c11 * tx
+        return np.clip(c0 * (1.0 - ty) + c1 * ty, 0.0, 1.0).astype(np.float32)
+
     def to_dict(self):
         if self.path is None:
             return None

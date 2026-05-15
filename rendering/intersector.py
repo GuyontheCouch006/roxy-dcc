@@ -251,6 +251,10 @@ class EmbreeIntersector(SceneIntersector):
         return self._triangle_scene.triangle_count
 
     @property
+    def triangle_scene(self):
+        return self._triangle_scene
+
+    @property
     def backend_name(self):
         return self._binding.name
 

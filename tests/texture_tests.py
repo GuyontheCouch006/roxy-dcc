@@ -45,6 +45,27 @@ def test_image_texture_bilinear_center():
     assert approx_eq(c.b, 0.5)
 
 
+def test_image_texture_sample_many_matches_scalar_samples():
+    pixels = np.array([
+        [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+        [[0.0, 0.0, 1.0], [1.0, 1.0, 1.0]],
+    ], dtype=np.float32)
+    tex = ImageTexture.from_array(pixels, flip_v=False)
+    uvs = np.array([
+        [0.0, 0.0],
+        [0.5, 0.5],
+        [0.25, 0.75],
+    ], dtype=np.float32)
+
+    batch = tex.sample_many(uvs)
+
+    for i, (u, v) in enumerate(uvs):
+        scalar = tex.sample(Vec2(float(u), float(v)))
+        assert approx_eq(batch[i, 0], scalar.r)
+        assert approx_eq(batch[i, 1], scalar.g)
+        assert approx_eq(batch[i, 2], scalar.b)
+
+
 def test_image_texture_array_exports_uint8_pixels():
     pixels = np.array([
         [[1.0, 0.0, 0.0], [0.0, 0.5, 1.0]],
@@ -63,5 +84,6 @@ if __name__ == "__main__":
         test_image_texture_samples_uv_corners,
         test_image_texture_repeats_uvs,
         test_image_texture_bilinear_center,
+        test_image_texture_sample_many_matches_scalar_samples,
         test_image_texture_array_exports_uint8_pixels,
     ])

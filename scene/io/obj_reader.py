@@ -1,4 +1,5 @@
 from pathlib import Path
+import time
 
 import numpy as np
 import core.timing as timing
@@ -26,6 +27,100 @@ def _print_mesh_stats(root, via):
     timing.defer_print(f"    via {via} — {meshes} meshes, {tris:,} tris")
 
 
+class _OBJProgress:
+    def __init__(self, file_path, callback, phase="Parsing OBJ"):
+        self._callback = callback
+        self._phase = phase
+        self._total_bytes = max(1, file_path.stat().st_size)
+        self._bytes_read = 0
+        self._line_count = 0
+        self._vertices = 0
+        self._normals = 0
+        self._uvs = 0
+        self._faces = 0
+        self._triangles = 0
+        self._object_name = ""
+        self._group_name = ""
+        self._material_name = "default"
+        self._last_emit_time = 0.0
+        self._last_emit_percent = -1.0
+        self._last_assembly_emit_time = 0.0
+
+    def advance(self, line):
+        if not self._callback:
+            return
+        self._bytes_read += len(line.encode("utf-8"))
+        self._line_count += 1
+
+    def count_vertex(self):
+        self._vertices += 1
+
+    def count_normal(self):
+        self._normals += 1
+
+    def count_uv(self):
+        self._uvs += 1
+
+    def count_face(self, vertex_count):
+        self._faces += 1
+        self._triangles += max(0, vertex_count - 2)
+
+    def set_object(self, name):
+        self._object_name = name
+
+    def set_group(self, name):
+        self._group_name = name
+
+    def set_material(self, name):
+        self._material_name = name
+
+    def emit(self, force=False, phase=None, detail=None):
+        if not self._callback:
+            return
+
+        percent = min(100.0, self._bytes_read / self._total_bytes * 100.0)
+        now = time.perf_counter()
+        if not force and percent - self._last_emit_percent < 1.0 and now - self._last_emit_time < 0.25:
+            return
+
+        self._last_emit_time = now
+        self._last_emit_percent = percent
+        self._callback(phase or self._phase, detail or self._detail(percent))
+
+    def emit_assembly(self, current, total, triangle_count):
+        if not self._callback:
+            return
+        now = time.perf_counter()
+        if current != total and now - self._last_assembly_emit_time < 0.25:
+            return
+        self._last_assembly_emit_time = now
+        self._callback(
+            "Assembling OBJ meshes",
+            f"{current:,}/{total:,} mesh leaves • {triangle_count:,} triangles in current leaf",
+        )
+
+    def finish(self, phase="Loaded OBJ"):
+        self.emit(force=True, phase=phase, detail=self._detail(100.0))
+
+    def _detail(self, percent):
+        labels = []
+        if self._object_name:
+            labels.append(f"object: {self._object_name}")
+        if self._group_name:
+            labels.append(f"group: {self._group_name}")
+        if self._material_name:
+            labels.append(f"material: {self._material_name}")
+        suffix = " • ".join(labels)
+        if suffix:
+            suffix = " • " + suffix
+        return (
+            f"{percent:5.1f}% • {self._line_count:,} lines • "
+            f"{self._vertices:,} verts • {self._uvs:,} uvs • "
+            f"{self._faces:,} faces • {self._triangles:,} tris"
+            f"{suffix}"
+        )
+
+
 class OBJReader:
     """OBJ file reader.
 
@@ -37,8 +132,8 @@ class OBJReader:
     INDEXED_AUTO_THRESHOLD_BYTES = 32 * 1024 * 1024
 
     @staticmethod
-    @timing.timer(tag="load", label_fn=lambda path, *_: Path(path).name)
-    def load(path, name=None, indexed=None, build_bvh=False):
+    @timing.timer(tag="load", label_fn=lambda path, *_, **__: Path(path).name)
+    def load(path, name=None, indexed=None, build_bvh=False, progress=None):
         """Load an OBJ file. Uses Assimp if available, falls back to pure Python."""
         file_path = Path(path)
         if indexed is None:
@@ -48,7 +143,12 @@ class OBJReader:
             )
 
         if indexed:
-            result = OBJReader._load_python_indexed(path, name, build_bvh=build_bvh)
+            result = OBJReader._load_python_indexed(
+                path,
+                name,
+                build_bvh=build_bvh,
+                progress=progress,
+            )
             _print_mesh_stats(result, "indexed Python")
             return result
 
@@ -56,6 +156,8 @@ class OBJReader:
 
         if AssimpImporter.is_available():
             try:
+                if progress:
+                    progress("Loading OBJ with Assimp", str(file_path))
                 result = AssimpImporter.load(path, name)
                 if result and result.children:
                     if OBJReader._obj_material_names_missing(path, result):
@@ -66,12 +168,12 @@ class OBJReader:
             except Exception as e:
                 print(f"    Assimp failed ({e}), falling back to Python parser")
 
-        result = OBJReader._load_python(path, name)
+        result = OBJReader._load_python(path, name, progress=progress)
         _print_mesh_stats(result, "Python")
         return result
 
     @staticmethod
-    def _load_python_indexed(path, name=None, build_bvh=False):
+    def _load_python_indexed(path, name=None, build_bvh=False, progress=None):
         """Load an OBJ hierarchy with IndexedMesh leaves.
 
         Unlike _load_python(), this keeps vertices/normals/UVs in shared arrays and
@@ -83,6 +185,7 @@ class OBJReader:
         from scene.io.mtl_loader import MTLLoader
 
         file_path = Path(path)
+        tracker = _OBJProgress(file_path, progress)
         root = SceneObject(name=name or file_path.stem)
         positions, normals, uvs = [], [], []
         mtl_materials = {}
@@ -136,31 +239,43 @@ class OBJReader:
 
         with open(file_path, 'r') as f:
             for line in f:
+                tracker.advance(line)
                 parts = line.split()
                 if not parts or parts[0].startswith('#'):
+                    tracker.emit()
                     continue
                 token = parts[0]
 
                 if token == 'mtllib':
                     mtl_path = file_path.parent / parts[1]
+                    tracker.emit(
+                        force=True,
+                        phase="Loading material library",
+                        detail=str(mtl_path),
+                    )
                     if mtl_path.exists():
                         raw = MTLLoader.load(str(mtl_path))
                         mtl_materials.update({n: m.to_material() for n, m in raw.items()})
                 elif token == 'v':
                     positions.append([float(parts[1]), float(parts[2]), float(parts[3])])
+                    tracker.count_vertex()
                 elif token == 'vn':
                     normals.append([float(parts[1]), float(parts[2]), float(parts[3])])
+                    tracker.count_normal()
                 elif token == 'vt':
                     uvs.append([float(parts[1]), float(parts[2])])
+                    tracker.count_uv()
                 elif token == 'o':
                     flush()
                     obj_name = parts[1] if len(parts) > 1 else 'object'
+                    tracker.set_object(obj_name)
                     current_obj_node = SceneObject(name=obj_name)
                     root.add_child(current_obj_node)
                     current_group_node = current_obj_node
                 elif token == 'g':
                     flush()
                     group_name = parts[1] if len(parts) > 1 else 'group'
+                    tracker.set_group(group_name)
                     current_group_node = SceneObject(name=group_name)
                     current_obj_node.add_child(current_group_node)
                 elif token == 'usemtl':
@@ -168,9 +283,11 @@ class OBJReader:
                     if new_mtl != current_mtl:
                         flush()
                     current_mtl = new_mtl
+                    tracker.set_material(current_mtl)
                     current_gid = group_id(current_mtl)
                 elif token == 'f':
                     face = parts[1:]
+                    tracker.count_face(len(face))
                     vi, ni, uvi = [], [], []
                     for part in face:
                         vals = part.split('/')
@@ -187,8 +304,10 @@ class OBJReader:
                     continue
                 else:
                     print(f"Warning: Unrecognized OBJ token: {token!r}")
+                tracker.emit()
 
         flush()
+        tracker.finish("Parsed OBJ")
         positions_arr = np.asarray(positions, dtype=np.float64).reshape((-1, 3))
         normals_arr = (
             np.asarray(normals, dtype=np.float64).reshape((-1, 3))
@@ -199,7 +318,8 @@ class OBJReader:
             if uvs else None
         )
 
-        for leaf in leaves:
+        for i, leaf in enumerate(leaves, 1):
+            tracker.emit_assembly(i, len(leaves), len(leaf["tri_pos_idx"]))
             mesh = IndexedMesh(
                 positions_arr,
                 leaf["tri_pos_idx"],
@@ -219,19 +339,21 @@ class OBJReader:
             shape = ShapeNode(mesh, mat_groups, name=leaf["name"])
             leaf["parent"].add_child(SceneObject(shapes=[shape], name=leaf["name"]))
 
+        tracker.emit(force=True, phase="Finished OBJ hierarchy", detail=f"{len(leaves):,} mesh leaves")
         return root
 
     @staticmethod
-    def load_as_indexed_mesh(path, build_bvh=False):
+    def load_as_indexed_mesh(path, build_bvh=False, progress=None):
         """Load an OBJ into IndexedMesh storage without material objects."""
-        mesh, _ = OBJReader._parse_indexed(path, build_bvh=build_bvh)
+        mesh, _ = OBJReader._parse_indexed(path, build_bvh=build_bvh, progress=progress)
         return mesh
 
     @staticmethod
-    def _parse_indexed(path, build_bvh=False):
+    def _parse_indexed(path, build_bvh=False, progress=None):
         from scene.io.mtl_loader import MTLLoader
 
         file_path = Path(path)
+        tracker = _OBJProgress(file_path, progress)
         positions, normals, uvs = [], [], []
         tri_pos_idx, tri_normal_idx, tri_uv_idx, tri_group_idx = [], [], [], []
         group_names, group_to_idx = [], {}
@@ -253,27 +375,39 @@ class OBJReader:
 
         with open(file_path, 'r') as f:
             for line in f:
+                tracker.advance(line)
                 parts = line.split()
                 if not parts or parts[0].startswith('#'):
+                    tracker.emit()
                     continue
                 token = parts[0]
 
                 if token == 'mtllib':
                     mtl_path = file_path.parent / parts[1]
+                    tracker.emit(
+                        force=True,
+                        phase="Loading material library",
+                        detail=str(mtl_path),
+                    )
                     if mtl_path.exists():
                         raw = MTLLoader.load(str(mtl_path))
                         mtl_materials.update({n: m.to_material() for n, m in raw.items()})
                 elif token == 'v':
                     positions.append([float(parts[1]), float(parts[2]), float(parts[3])])
+                    tracker.count_vertex()
                 elif token == 'vn':
                     normals.append([float(parts[1]), float(parts[2]), float(parts[3])])
+                    tracker.count_normal()
                 elif token == 'vt':
                     uvs.append([float(parts[1]), float(parts[2])])
+                    tracker.count_uv()
                 elif token == 'usemtl':
                     current_mtl = parts[1] if len(parts) > 1 else 'default'
+                    tracker.set_material(current_mtl)
                     current_gid = group_id(current_mtl)
                 elif token == 'f':
                     face = parts[1:]
+                    tracker.count_face(len(face))
                     vi, ni, uvi = [], [], []
                     for part in face:
                         vals = part.split('/')
@@ -287,10 +421,17 @@ class OBJReader:
                         tri_group_idx.append(current_gid)
                         used_groups.add(current_mtl)
                 elif token in ('o', 'g', 's'):
+                    if token == 'o':
+                        tracker.set_object(parts[1] if len(parts) > 1 else 'object')
+                    elif token == 'g':
+                        tracker.set_group(parts[1] if len(parts) > 1 else 'group')
                     continue
                 else:
                     print(f"Warning: Unrecognized OBJ token: {token!r}")
+                tracker.emit()
 
+        tracker.finish("Parsed OBJ")
+        tracker.emit(force=True, phase="Assembling indexed mesh")
         mesh = IndexedMesh(
             positions,
             tri_pos_idx,
@@ -341,7 +482,7 @@ class OBJReader:
         return not wanted.issubset(found)
 
     @staticmethod
-    def _load_python(path, name=None):
+    def _load_python(path, name=None, progress=None):
         """Load an OBJ and return a SceneObject hierarchy.
 
         Structure:
@@ -354,6 +495,7 @@ class OBJReader:
         from scene.io.mtl_loader import MTLLoader
 
         file_path = Path(path)
+        tracker = _OBJProgress(file_path, progress)
         root = SceneObject(name=name or file_path.stem)
 
         vertices, normals, uvs = [], [], []
@@ -384,31 +526,43 @@ class OBJReader:
 
         with open(file_path, 'r') as f:
             for line in f:
+                tracker.advance(line)
                 parts = line.split()
                 if not parts or parts[0].startswith('#'):
+                    tracker.emit()
                     continue
                 token = parts[0]
 
                 if token == 'mtllib':
                     mtl_path = file_path.parent / parts[1]
+                    tracker.emit(
+                        force=True,
+                        phase="Loading material library",
+                        detail=str(mtl_path),
+                    )
                     if mtl_path.exists():
                         raw = MTLLoader.load(str(mtl_path))
                         mtl_materials = {n: m.to_material() for n, m in raw.items()}
 
                 elif token == 'v':
                     vertices.append(Vec3(float(parts[1]), float(parts[2]), float(parts[3])))
+                    tracker.count_vertex()
                 elif token == 'vn':
                     normals.append(Vec3(float(parts[1]), float(parts[2]), float(parts[3])))
+                    tracker.count_normal()
                 elif token == 'vt':
                     uvs.append(Vec2(float(parts[1]), float(parts[2])))
+                    tracker.count_uv()
 
                 elif token == 'o':
                     flush()
                     obj_name = parts[1] if len(parts) > 1 else 'object'
+                    tracker.set_object(obj_name)
                     current_obj_node = SceneObject(name=obj_name)
                     root.add_child(current_obj_node)
 
                 elif token == 'g':
+                    tracker.set_group(parts[1] if len(parts) > 1 else 'group')
                     pass  # Don't flush — 'g' often appears AFTER its faces in OBJ files.
 
                 elif token == 'usemtl':
@@ -416,9 +570,11 @@ class OBJReader:
                     if new_mtl != current_mtl and pending:
                         flush()
                     current_mtl = new_mtl
+                    tracker.set_material(current_mtl)
 
                 elif token == 'f':
                     face = parts[1:]
+                    tracker.count_face(len(face))
                     vi, ni, uvi = [], [], []
                     for part in face:
                         vals = part.split('/')
@@ -441,8 +597,10 @@ class OBJReader:
                     continue
                 else:
                     print(f"Warning: Unrecognized OBJ token: {token!r}")
+                tracker.emit()
 
         flush()
+        tracker.finish("Loaded OBJ")
         return root
 
     @staticmethod
