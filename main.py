@@ -1,4 +1,4 @@
-RENDER_BACKEND = "embree"  # "embree", "taichi", or "python"
+RENDER_BACKEND = "embree_wavefront"  # "embree_wavefront", "embree_preview", "taichi", or "python"
 DEBUG_LEVEL = 0   # 0=off  1=milestone timers  2=timers + cProfile
 
 import random
@@ -16,19 +16,26 @@ from rendering.startup_progress import StartupProgress
 
 
 def _startup_steps():
-    if RENDER_BACKEND in ("embree", "taichi"):
+    if RENDER_BACKEND in ("embree_wavefront", "embree_preview"):
+        return 10
+    if RENDER_BACKEND == "taichi":
         return 9
     return 8
 
 
 def _renderer_label():
-    if RENDER_BACKEND == "embree":
+    if RENDER_BACKEND == "embree_wavefront":
+        return "Embree wavefront path tracer"
+    if RENDER_BACKEND == "embree_preview":
         return "Embree direct-light preview"
     if RENDER_BACKEND == "taichi":
         return "Taichi GPU renderer"
     if RENDER_BACKEND == "python":
         return "Python path tracer"
-    raise ValueError("RENDER_BACKEND must be 'embree', 'taichi', or 'python'")
+    raise ValueError(
+        "RENDER_BACKEND must be 'embree_wavefront', 'embree_preview', "
+        "'taichi', or 'python'"
+    )
 
 
 def build_rabbit():
@@ -435,9 +442,8 @@ def main():
             denoise=True,
             startup_progress=progress,
         )
-    elif RENDER_BACKEND == "embree":
+    elif RENDER_BACKEND in ("embree_wavefront", "embree_preview"):
         from rendering.intersector import EmbreeIntersector, EmbreeUnavailableError
-        from rendering.embree_preview_renderer import EmbreePreviewRenderer
 
         progress.step(
             "Building Embree scene",
@@ -453,11 +459,31 @@ def main():
             f"  Embree: {intersector.triangle_count:,} triangles "
             f"via {intersector.backend_name}"
         )
-        tracer = EmbreePreviewRenderer(
-            world, image, viewport,
-            intersector=intersector,
-            startup_progress=progress,
-        )
+        if RENDER_BACKEND == "embree_wavefront":
+            from rendering.embree_wavefront_renderer import EmbreeWavefrontRenderer
+
+            tracer = EmbreeWavefrontRenderer(
+                world, image, viewport,
+                samples=4,
+                max_depth=3,
+                direct_light_max_depth=1,
+                intersector=intersector,
+                startup_progress=progress,
+            )
+        else:
+            from rendering.embree_preview_renderer import EmbreePreviewRenderer
+
+            tracer = EmbreePreviewRenderer(
+                world, image, viewport,
+                intersector=intersector,
+                startup_progress=progress,
+            )
+        if hasattr(tracer, "preload_textures"):
+            progress.step(
+                "Preparing render textures",
+                "Loading capped preview textures for the Embree renderer.",
+            )
+            tracer.preload_textures()
     else:
         tracer = RayTracer(
             world, image, viewport,

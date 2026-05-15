@@ -35,6 +35,15 @@ class EmbreePreviewRenderer:
         self._last_ray_count = 0
         self._texture_cache = {}
 
+    def preload_textures(self):
+        for material in self._scene.materials:
+            texture = getattr(material, "_albedo_texture", None)
+            if texture is not None:
+                self._sample_texture(
+                    texture,
+                    np.asarray([[0.0, 0.0]], dtype=np.float32),
+                )
+
     def render(self):
         W, H = self._image.width, self._image.height
         start = time.perf_counter()
