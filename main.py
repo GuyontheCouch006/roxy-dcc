@@ -1,4 +1,4 @@
-USE_TAICHI  = True
+RENDER_BACKEND = "embree_wavefront"  # "embree_wavefront", "embree_preview", "taichi", or "python"
 DEBUG_LEVEL = 0   # 0=off  1=milestone timers  2=timers + cProfile
 
 import random
@@ -14,6 +14,29 @@ from rendering import Image, GLViewport
 from scene.io import load_scene
 from scene.io.obj_reader import OBJReader
 from rendering.startup_progress import StartupProgress
+
+
+def _startup_steps():
+    if RENDER_BACKEND in ("embree_wavefront", "embree_preview"):
+        return 10
+    if RENDER_BACKEND == "taichi":
+        return 9
+    return 8
+
+
+def _renderer_label():
+    if RENDER_BACKEND == "embree_wavefront":
+        return "Embree wavefront path tracer"
+    if RENDER_BACKEND == "embree_preview":
+        return "Embree direct-light preview"
+    if RENDER_BACKEND == "taichi":
+        return "Taichi GPU renderer"
+    if RENDER_BACKEND == "python":
+        return "Python path tracer"
+    raise ValueError(
+        "RENDER_BACKEND must be 'embree_wavefront', 'embree_preview', "
+        "'taichi', or 'python'"
+    )
 
 
 def build_rabbit():
@@ -392,7 +415,7 @@ def main():
     W, H = int(1920), int(1080)
     progress = StartupProgress(
         "Roxy startup",
-        total_steps=9 if USE_TAICHI else 8,
+        total_steps=_startup_steps(),
     )
 
     progress.step("Starting Roxy", f"Preparing {W} x {H} render.")
@@ -406,9 +429,9 @@ def main():
 
     progress.step(
         "Preparing renderer",
-        "Taichi GPU renderer" if USE_TAICHI else "Python path tracer",
+        _renderer_label(),
     )
-    if USE_TAICHI:
+    if RENDER_BACKEND == "taichi":
         tracer = TaichiRenderer(
             world, image, viewport,
             samples=2000,
@@ -418,6 +441,48 @@ def main():
             denoise=True,
             startup_progress=progress,
         )
+    elif RENDER_BACKEND in ("embree_wavefront", "embree_preview"):
+        from rendering.intersector import EmbreeIntersector, EmbreeUnavailableError
+
+        progress.step(
+            "Building Embree scene",
+            "Flattening mesh triangles and creating the Embree accelerator.",
+        )
+        try:
+            intersector = EmbreeIntersector(world)
+        except EmbreeUnavailableError:
+            progress.close()
+            raise
+
+        print(
+            f"  Embree: {intersector.triangle_count:,} triangles "
+            f"via {intersector.backend_name}"
+        )
+        if RENDER_BACKEND == "embree_wavefront":
+            from rendering.embree_wavefront_renderer import EmbreeWavefrontRenderer
+
+            tracer = EmbreeWavefrontRenderer(
+                world, image, viewport,
+                samples=4,
+                max_depth=3,
+                direct_light_max_depth=1,
+                intersector=intersector,
+                startup_progress=progress,
+            )
+        else:
+            from rendering.embree_preview_renderer import EmbreePreviewRenderer
+
+            tracer = EmbreePreviewRenderer(
+                world, image, viewport,
+                intersector=intersector,
+                startup_progress=progress,
+            )
+        if hasattr(tracer, "preload_textures"):
+            progress.step(
+                "Preparing render textures",
+                "Loading capped preview textures for the Embree renderer.",
+            )
+            tracer.preload_textures()
     else:
         tracer = RayTracer(
             world, image, viewport,
