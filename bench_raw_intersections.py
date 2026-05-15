@@ -92,29 +92,44 @@ def _make_intersector(kind, world, triangle_scene):
     if kind == "triangle-array":
         return TriangleArrayIntersector(triangle_scene)
     if kind == "embree":
-        return EmbreeIntersector(world)
+        return EmbreeIntersector(triangle_scene=triangle_scene)
     raise ValueError(f"Unknown backend: {kind}")
 
 
-def _time_closest(intersector, rays, repeats):
+def _use_raw_arrays(kind):
+    return kind in ("triangle-array", "embree")
+
+
+def _time_closest(intersector, rays, origins, directions, repeats, use_raw):
     best_hits = None
     samples = []
     for _ in range(repeats):
         start = time.perf_counter()
-        best_hits = intersector.intersect_many(rays)
+        if use_raw:
+            best_hits = intersector.intersect_raw_arrays(origins, directions)
+        else:
+            best_hits = intersector.intersect_many(rays)
         samples.append(time.perf_counter() - start)
+    if use_raw:
+        hit_mask = best_hits["hit"]
+        checksum = float(np.sum(best_hits["t"][hit_mask])) if hit_mask.any() else 0.0
+        return np.asarray(samples), int(np.count_nonzero(hit_mask)), checksum
     finite = [hit.t for hit in best_hits if hit is not None]
     checksum = float(np.sum(finite)) if finite else 0.0
     return np.asarray(samples), len(finite), checksum
 
 
-def _time_occluded(intersector, rays, repeats, max_t):
+def _time_occluded(intersector, rays, origins, directions, repeats, max_t, use_raw):
     blocked = None
     samples = []
-    max_ts = np.full(len(rays), max_t, dtype=np.float32)
+    ray_count = len(origins) if use_raw else len(rays)
+    max_ts = np.full(ray_count, max_t, dtype=np.float32)
     for _ in range(repeats):
         start = time.perf_counter()
-        blocked = intersector.occluded_many(rays, max_ts)
+        if use_raw:
+            blocked = intersector.occluded_raw_arrays(origins, directions, max_ts)
+        else:
+            blocked = intersector.occluded_many(rays, max_ts)
         samples.append(time.perf_counter() - start)
     checksum = int(np.count_nonzero(blocked))
     return np.asarray(samples), checksum, float(checksum)
@@ -174,7 +189,8 @@ def main():
     if args.max_rays and len(origins) > args.max_rays:
         origins = origins[:args.max_rays]
         directions = directions[:args.max_rays]
-    rays = _rays_from_arrays(origins, directions)
+    use_raw = _use_raw_arrays(args.backend)
+    rays = _rays_from_arrays(origins, directions) if not use_raw else []
 
     try:
         intersector = _make_intersector(args.backend, world, triangle_scene)
@@ -184,17 +200,38 @@ def main():
 
     for _ in range(args.warmups):
         if args.query == "closest":
-            intersector.intersect_many(rays)
+            if use_raw:
+                intersector.intersect_raw_arrays(origins, directions)
+            else:
+                intersector.intersect_many(rays)
         else:
-            intersector.occluded_many(rays, np.full(len(rays), args.max_t, dtype=np.float32))
+            max_ts = np.full(len(origins), args.max_t, dtype=np.float32)
+            if use_raw:
+                intersector.occluded_raw_arrays(origins, directions, max_ts)
+            else:
+                intersector.occluded_many(rays, max_ts)
 
     if args.query == "closest":
-        samples, hit_count, checksum = _time_closest(intersector, rays, args.repeats)
+        samples, hit_count, checksum = _time_closest(
+            intersector,
+            rays,
+            origins,
+            directions,
+            args.repeats,
+            use_raw,
+        )
     else:
         samples, hit_count, checksum = _time_occluded(
-            intersector, rays, args.repeats, args.max_t)
+            intersector,
+            rays,
+            origins,
+            directions,
+            args.repeats,
+            args.max_t,
+            use_raw,
+        )
 
-    _print_result(args, len(rays), samples, hit_count, checksum, triangle_scene)
+    _print_result(args, len(origins), samples, hit_count, checksum, triangle_scene)
     return 0
 
 
