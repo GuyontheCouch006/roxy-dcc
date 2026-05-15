@@ -13,6 +13,7 @@ _worker_world  = None
 _worker_camera = None
 _worker_lights = None
 _worker_direct_light_mode = None
+_worker_direct_light_max_depth = None
 _worker_sample_clamp = None
 
 
@@ -39,13 +40,16 @@ _SHADOW_EPSILON = 1e-4
 _PDF_EPSILON = 1e-12
 
 
-def _init_worker(world, camera, lights, direct_light_mode, sample_clamp):
+def _init_worker(world, camera, lights, direct_light_mode,
+                 direct_light_max_depth, sample_clamp):
     global _worker_world, _worker_camera, _worker_lights
-    global _worker_direct_light_mode, _worker_sample_clamp
+    global _worker_direct_light_mode, _worker_direct_light_max_depth
+    global _worker_sample_clamp
     _worker_world  = world
     _worker_camera = camera
     _worker_lights = lights
     _worker_direct_light_mode = direct_light_mode
+    _worker_direct_light_max_depth = direct_light_max_depth
     _worker_sample_clamp = sample_clamp
 
 
@@ -205,7 +209,7 @@ def _guide_tuple(color, rays_cast, collect_guides,
 
 
 def _trace(ray, world, max_depth, lights=None, direct_light_mode="one", depth=0,
-           collect_guides=False):
+           collect_guides=False, direct_light_max_depth=1):
     if depth >= max_depth:
         return _guide_tuple(Color(0, 0, 0), 0, collect_guides)
 
@@ -225,10 +229,10 @@ def _trace(ray, world, max_depth, lights=None, direct_light_mode="one", depth=0,
 
     scattered, attenuation = result
     direct = Color(0, 0, 0)
-    if mat.taichi_type_id() == 0:
+    if mat.taichi_type_id() == 0 and depth < direct_light_max_depth:
         direct, shadow_rays = _direct_light_sample(hit, world, lights or [], attenuation, direct_light_mode)
         rays_cast += shadow_rays
-    elif mat.taichi_type_id() == 4:
+    elif mat.taichi_type_id() == 4 and depth < direct_light_max_depth:
         roughness = mat.taichi_params()[0]
         direct, shadow_rays = _direct_light_sample(hit, world, lights or [], attenuation, direct_light_mode)
         direct *= roughness
@@ -243,7 +247,10 @@ def _trace(ray, world, max_depth, lights=None, direct_light_mode="one", depth=0,
             )
         attenuation = attenuation / survival
 
-    bounced, bounce_rays = _trace(scattered, world, max_depth, lights, direct_light_mode, depth + 1)
+    bounced, bounce_rays = _trace(
+        scattered, world, max_depth, lights, direct_light_mode, depth + 1,
+        direct_light_max_depth=direct_light_max_depth,
+    )
     color = emission + direct + attenuation * bounced
     return _guide_tuple(
         color, rays_cast + bounce_rays, collect_guides,
@@ -267,7 +274,8 @@ def _trace_band_worker(args):
             )
             c, ray_count, normal, albedo, depth_value = _trace(
                 ray, _worker_world, max_depth, _worker_lights,
-                _worker_direct_light_mode, collect_guides=True)
+                _worker_direct_light_mode, collect_guides=True,
+                direct_light_max_depth=_worker_direct_light_max_depth)
             c = clamp_color_sample(c, _worker_sample_clamp)
             rays_cast += ray_count
             band[y - y_start, x] = (c[0], c[1], c[2])
@@ -283,7 +291,7 @@ class RayTracer:
                  denoise_radius=1, denoise_sigma=0.08, denoise_amount=0.8,
                  sample_clamp=10.0, adaptive_sampling=False,
                  adaptive_min_samples=4, adaptive_threshold=0.002,
-                 adaptive_check_interval=1):
+                 adaptive_check_interval=1, direct_light_max_depth=1):
         self._world     = world
         self._image     = image
         self._viewport  = viewport
@@ -294,6 +302,9 @@ class RayTracer:
         if direct_light_mode not in ("one", "random", "sample", "all", "final"):
             raise ValueError("direct_light_mode must be 'one' or 'all'")
         self._direct_light_mode = "all" if direct_light_mode in ("all", "final") else "one"
+        if direct_light_max_depth is None:
+            direct_light_max_depth = max_depth
+        self._direct_light_max_depth = max(0, int(direct_light_max_depth))
         self._denoise = denoise
         self._denoise_radius = denoise_radius
         self._denoise_sigma = denoise_sigma
@@ -344,7 +355,8 @@ class RayTracer:
                     )
                     c, ray_count, normal, albedo, depth_value = _trace(
                         ray, self._world, self._max_depth, self._lights,
-                        self._direct_light_mode, collect_guides=True)
+                        self._direct_light_mode, collect_guides=True,
+                        direct_light_max_depth=self._direct_light_max_depth)
                     c = clamp_color_sample(c, self._sample_clamp)
                     rays_cast += ray_count
                     accum[y, x] = (accum[y, x] * frame + [c[0], c[1], c[2]]) / (frame + 1)
@@ -400,7 +412,8 @@ class RayTracer:
             initializer=_init_worker,
             initargs=(
                 self._world, self._camera, self._lights,
-                self._direct_light_mode, self._sample_clamp,
+                self._direct_light_mode, self._direct_light_max_depth,
+                self._sample_clamp,
             ),
         ) as pool:
             for frame in range(self._samples):

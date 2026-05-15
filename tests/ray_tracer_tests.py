@@ -199,6 +199,27 @@ def test_render_direct_lights_diffuse_surface_at_max_depth_one():
     assert tracer.last_ray_count > W * H
 
 
+def test_direct_light_depth_zero_skips_shadow_rays():
+    world = _world(use_sky=False)
+    world.add_object(SceneObject(
+        shape=Sphere(),
+        material=Diffuse(Color(0.8, 0.8, 0.8)),
+        translation=Vec3(0, 0, -3),
+    ))
+    world.add_object(SceneObject(
+        shape=Sphere(),
+        material=Emissive(Color(1, 1, 1), intensity=40.0),
+        translation=Vec3(0, 2, -1),
+        scale=Vec3(0.5, 0.5, 0.5),
+    ))
+    tracer, image = _tracer(
+        world, samples=1, max_depth=1, direct_light_max_depth=0)
+    tracer.render()
+    pixel_sum = sum(float(image.pixels[y, x, c]) for y in range(H) for x in range(W) for c in range(3))
+    assert approx_eq(pixel_sum, 0.0)
+    assert tracer.last_ray_count == W * H
+
+
 def test_sphere_light_sample_is_on_light_surface_with_pdf_terms():
     random.seed(11)
     light = _test_sphere_light(z=4.0)
@@ -334,6 +355,7 @@ if __name__ == "__main__":
         test_adaptive_sampling_report_includes_stop_fields_when_enabled,
         test_render_sphere_in_front_writes_color,
         test_render_direct_lights_diffuse_surface_at_max_depth_one,
+        test_direct_light_depth_zero_skips_shadow_rays,
         test_sphere_light_sample_is_on_light_surface_with_pdf_terms,
         test_direct_light_one_mode_casts_one_shadow_ray_for_visible_light,
         test_direct_light_all_mode_casts_one_shadow_ray_per_visible_light,

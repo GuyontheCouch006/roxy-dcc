@@ -90,7 +90,8 @@ def direct_light_sample(hit_p, normal, albedo, direct_light_mode):
 
 
 @ti.func
-def trace(ro, rd, max_depth, use_sky, bg_color, direct_light_mode):
+def trace(ro, rd, max_depth, use_sky, bg_color,
+          direct_light_mode, direct_light_max_depth):
     color       = ti.Vector([0.0, 0.0, 0.0])
     throughput  = ti.Vector([1.0, 1.0, 1.0])
     current_ior = 1.0
@@ -146,7 +147,9 @@ def trace(ro, rd, max_depth, use_sky, bg_color, direct_light_mode):
             break
 
         elif mat_type == 0:  # diffuse
-            color += throughput * direct_light_sample(hit_p, normal, albedo, direct_light_mode)
+            if depth < direct_light_max_depth:
+                color += throughput * direct_light_sample(
+                    hit_p, normal, albedo, direct_light_mode)
             rd = diffuse_scatter(normal)
             throughput *= albedo
 
@@ -155,7 +158,9 @@ def trace(ro, rd, max_depth, use_sky, bg_color, direct_light_mode):
             throughput *= albedo
 
         elif mat_type == 4:  # glossy
-            color += throughput * direct_light_sample(hit_p, normal, albedo, direct_light_mode) * roughness
+            if depth < direct_light_max_depth:
+                color += throughput * direct_light_sample(
+                    hit_p, normal, albedo, direct_light_mode) * roughness
             rd = glossy_scatter(rd, normal, roughness)
             throughput *= albedo
 
@@ -189,6 +194,7 @@ def render_kernel(
     max_depth: int,
     use_sky: int,
     direct_light_mode: int,
+    direct_light_max_depth: int,
     sample_clamp: float,
     bg_color: ti.types.vector(3, ti.f32),
     cam_pos:   ti.types.vector(3, ti.f32),
@@ -201,7 +207,8 @@ def render_kernel(
         rd = get_ray_direction(x, y, W, H, frame, fov_tan, aspect,
                                cam_fwd, cam_right, cam_up)
         sample, normal_sample, albedo_sample, depth_sample = trace(
-            cam_pos, rd, max_depth, use_sky, bg_color, direct_light_mode)
+            cam_pos, rd, max_depth, use_sky, bg_color,
+            direct_light_mode, direct_light_max_depth)
         if sample_clamp > 0.0:
             limit = ti.Vector([sample_clamp, sample_clamp, sample_clamp])
             sample = ti.min(ti.max(sample, ti.Vector([0.0, 0.0, 0.0])), limit)

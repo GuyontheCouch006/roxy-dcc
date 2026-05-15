@@ -26,7 +26,7 @@ class TaichiRenderer:
     def __init__(self, world, image, viewport, samples=16, max_depth=4,
                  direct_light_mode="one", denoise=False,
                  denoise_radius=1, denoise_sigma=0.08, denoise_amount=0.8,
-                 sample_clamp=10.0):
+                 sample_clamp=10.0, direct_light_max_depth=1):
         self._world     = world
         self._image     = image
         self._viewport  = viewport
@@ -34,6 +34,9 @@ class TaichiRenderer:
         self._max_depth = max_depth
         self._direct_light_mode = direct_light_mode
         self._direct_light_mode_id = self._direct_light_mode_to_id(direct_light_mode)
+        if direct_light_max_depth is None:
+            direct_light_max_depth = max_depth
+        self._direct_light_max_depth = max(0, int(direct_light_max_depth))
         self._denoise = denoise
         self._denoise_radius = denoise_radius
         self._denoise_sigma = denoise_sigma
@@ -55,7 +58,8 @@ class TaichiRenderer:
     def _jit_frame(self, W, H, fov_tan, aspect, use_sky, bg_color,
                    cam_pos, cam_fwd, cam_right, cam_up):
         render_kernel(W, H, fov_tan, aspect, self._max_depth, use_sky,
-                      self._direct_light_mode_id, self._sample_clamp, bg_color,
+                      self._direct_light_mode_id, self._direct_light_max_depth,
+                      self._sample_clamp, bg_color,
                       cam_pos, cam_fwd, cam_right, cam_up)
 
     @timing.timer("denoise", tag="render")
@@ -121,7 +125,8 @@ class TaichiRenderer:
                 break
             _ray_count[None] = 0
             render_kernel(W, H, fov_tan, aspect, self._max_depth, use_sky,
-                          self._direct_light_mode_id, self._sample_clamp, bg_color,
+                          self._direct_light_mode_id, self._direct_light_max_depth,
+                          self._sample_clamp, bg_color,
                           cam_pos, cam_fwd, cam_right, cam_up)
             total_rays_cast += int(_ray_count[None])
             _frame_count[None] = frame + 1
