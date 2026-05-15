@@ -352,7 +352,10 @@ def build_gallery(W, H, progress=None):
     OBJ = "sample_scenes/gallery/gallery.obj"
     if progress:
         progress.step("Loading gallery mesh", OBJ)
-    root = OBJReader.load(OBJ)
+    root = OBJReader.load(
+        OBJ,
+        progress=progress.update if progress else None,
+    )
     if progress:
         progress.step("Inspecting gallery hierarchy")
     debug_scene_object(root)

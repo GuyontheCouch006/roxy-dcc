@@ -310,6 +310,25 @@ def test_load_indexed_preserves_object_and_group_nodes():
         _cleanup(path)
 
 
+def test_load_indexed_reports_obj_progress():
+    obj = (
+        "o BikeFrame\n"
+        "g FrontTriangle\n"
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\n"
+        "usemtl matA\nf 1 2 3\n"
+    )
+    path = _write_obj(obj)
+    events = []
+    try:
+        OBJReader.load(path, indexed=True, progress=lambda title, detail: events.append((title, detail)))
+        assert events
+        assert any("Parsed OBJ" == title for title, _ in events)
+        assert any("1 tris" in detail or "1, tris" in detail for _, detail in events)
+        assert any("object: BikeFrame" in detail for _, detail in events)
+    finally:
+        _cleanup(path)
+
+
 if __name__ == "__main__":
     tests = [
         test_load_returns_mesh,
@@ -331,5 +350,6 @@ if __name__ == "__main__":
         test_load_two_usemtl_produce_two_children,
         test_load_indexed_hierarchy_has_indexed_mesh_and_material_groups,
         test_load_indexed_preserves_object_and_group_nodes,
+        test_load_indexed_reports_obj_progress,
     ]
     run_tests(tests)
