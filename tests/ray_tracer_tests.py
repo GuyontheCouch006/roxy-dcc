@@ -6,10 +6,18 @@
 #              max depth termination, and attenuation accumulation.
 # ============================================
 
+import random
+from types import SimpleNamespace
+
 from core import Vec3, Color, Ray, Point3
 from scene import Sphere, Diffuse, SceneObject, World, Camera
 from scene.materials import Emissive
 from rendering import RayTracer, Image
+from rendering.ray_tracer import (
+    _SphereLight,
+    _direct_light_sample,
+    _sample_sphere_light_surface,
+)
 from tests.utils import run_tests, approx_eq, vec3_approx_eq
 
 
@@ -23,9 +31,41 @@ def _world(use_sky=False):
     return world
 
 
-def _tracer(world, samples=1, max_depth=4):
+def _tracer(world, samples=1, max_depth=4, direct_light_mode="one", **kwargs):
     image = Image(W, H)
-    return RayTracer(world, image, viewport=None, samples=samples, max_depth=max_depth, threaded=False), image
+    return RayTracer(
+        world,
+        image,
+        viewport=None,
+        samples=samples,
+        max_depth=max_depth,
+        threaded=False,
+        direct_light_mode=direct_light_mode,
+        **kwargs,
+    ), image
+
+
+class _CountingOcclusionWorld:
+    def __init__(self, blocked=False):
+        self.blocked = blocked
+        self.max_t_values = []
+
+    def occluded(self, ray, max_t):
+        self.max_t_values.append(max_t)
+        return self.blocked
+
+
+def _direct_light_hit():
+    return SimpleNamespace(point=Point3(0, 0, 0), normal=Vec3(0, 0, 1))
+
+
+def _test_sphere_light(z=4.0, x=0.0):
+    return _SphereLight(
+        center=Point3(x, 0, z),
+        radius=0.5,
+        color=Color(1, 1, 1),
+        intensity=20.0,
+    )
 
 
 # ─── Construction ─────────────────────────────────────────────────────────────
@@ -90,6 +130,36 @@ def test_render_stats_format_includes_key_report_fields():
     assert "rays cast:" in report
     assert "rays / second:" in report
 
+def test_adaptive_sampling_stops_after_stable_minimum_samples():
+    world = _world(use_sky=False)
+    tracer, _ = _tracer(
+        world, samples=6, max_depth=1,
+        adaptive_sampling=True,
+        adaptive_min_samples=2,
+        adaptive_threshold=0.0,
+    )
+    tracer.render()
+    assert tracer.last_ray_count == W * H * 2
+    assert tracer.last_stats.samples_requested == 6
+    assert tracer.last_stats.samples_rendered == 2
+    assert tracer.last_stats.adaptive_sampling is True
+    assert tracer.last_stats.adaptive_stopped is True
+    assert tracer.last_stats.adaptive_error == 0.0
+
+def test_adaptive_sampling_report_includes_stop_fields_when_enabled():
+    world = _world(use_sky=False)
+    tracer, _ = _tracer(
+        world, samples=3, max_depth=1,
+        adaptive_sampling=True,
+        adaptive_min_samples=2,
+        adaptive_threshold=0.0,
+    )
+    tracer.render()
+    report = tracer.last_stats.format_report()
+    assert "adaptive stop:" in report
+    assert "adaptive error:" in report
+    assert "adaptive target:" in report
+
 
 # ─── Sphere hit ───────────────────────────────────────────────────────────────
 
@@ -127,6 +197,70 @@ def test_render_direct_lights_diffuse_surface_at_max_depth_one():
     pixel_sum = sum(float(image.pixels[y, x, c]) for y in range(H) for x in range(W) for c in range(3))
     assert pixel_sum > 0
     assert tracer.last_ray_count > W * H
+
+
+def test_sphere_light_sample_is_on_light_surface_with_pdf_terms():
+    random.seed(11)
+    light = _test_sphere_light(z=4.0)
+    sample = _sample_sphere_light_surface(Point3(0, 0, 0), light)
+    assert sample is not None
+    assert approx_eq((sample.point - light.center).length(), light.radius, eps=1e-5)
+    assert sample.distance > 0.0
+    assert sample.geometry_term > 0.0
+    assert sample.area_pdf > 0.0
+    assert sample.solid_angle_pdf > 0.0
+
+
+def test_direct_light_one_mode_casts_one_shadow_ray_for_visible_light():
+    random.seed(13)
+    world = _CountingOcclusionWorld()
+    lights = [_test_sphere_light(z=4.0), _test_sphere_light(z=5.0, x=0.5)]
+    direct, rays = _direct_light_sample(
+        _direct_light_hit(),
+        world,
+        lights,
+        Color(1, 1, 1),
+        "one",
+    )
+    assert rays == 1
+    assert len(world.max_t_values) == 1
+    assert world.max_t_values[0] > 0.0
+    assert direct.r > 0.0 and direct.g > 0.0 and direct.b > 0.0
+
+
+def test_direct_light_all_mode_casts_one_shadow_ray_per_visible_light():
+    random.seed(17)
+    world = _CountingOcclusionWorld()
+    lights = [_test_sphere_light(z=4.0), _test_sphere_light(z=5.0, x=0.5)]
+    direct, rays = _direct_light_sample(
+        _direct_light_hit(),
+        world,
+        lights,
+        Color(1, 1, 1),
+        "all",
+    )
+    assert rays == len(lights)
+    assert len(world.max_t_values) == len(lights)
+    assert all(max_t > 0.0 for max_t in world.max_t_values)
+    assert direct.r > 0.0 and direct.g > 0.0 and direct.b > 0.0
+
+
+def test_direct_light_occlusion_casts_shadow_ray_and_blocks_contribution():
+    random.seed(19)
+    world = _CountingOcclusionWorld(blocked=True)
+    direct, rays = _direct_light_sample(
+        _direct_light_hit(),
+        world,
+        [_test_sphere_light(z=4.0)],
+        Color(1, 1, 1),
+        "one",
+    )
+    assert rays == 1
+    assert len(world.max_t_values) == 1
+    assert approx_eq(direct.r, 0.0)
+    assert approx_eq(direct.g, 0.0)
+    assert approx_eq(direct.b, 0.0)
+
 
 def test_render_fills_entire_buffer():
     world = _world(use_sky=True)
@@ -196,8 +330,14 @@ if __name__ == "__main__":
         test_render_reports_actual_rays_cast_for_empty_scene,
         test_render_reports_zero_rays_when_max_depth_is_zero,
         test_render_stats_format_includes_key_report_fields,
+        test_adaptive_sampling_stops_after_stable_minimum_samples,
+        test_adaptive_sampling_report_includes_stop_fields_when_enabled,
         test_render_sphere_in_front_writes_color,
         test_render_direct_lights_diffuse_surface_at_max_depth_one,
+        test_sphere_light_sample_is_on_light_surface_with_pdf_terms,
+        test_direct_light_one_mode_casts_one_shadow_ray_for_visible_light,
+        test_direct_light_all_mode_casts_one_shadow_ray_per_visible_light,
+        test_direct_light_occlusion_casts_shadow_ray_and_blocks_contribution,
         test_render_fills_entire_buffer,
         test_trace_at_max_depth_returns_black,
         test_samples_averages_result,

@@ -7,7 +7,8 @@
 
 from scene import Material, Diffuse
 from scene.materials import Metal, Dielectric, Emissive
-from core import Vec3, Ray, Color, HitRecord
+from core import Vec2, Vec3, Ray, Color, HitRecord
+from scene.textures import ImageTexture
 from tests.utils import run_tests, approx_eq, vec3_approx_eq
 
 
@@ -42,6 +43,18 @@ def test_diffuse_custom_albedo_returned():
     _, attenuation = mat.scatter(None, _make_hit())
     assert vec3_approx_eq(attenuation, albedo), \
         f"Expected {albedo}, got {attenuation}"
+
+def test_diffuse_texture_albedo_uses_hit_uv():
+    texture = ImageTexture.from_array([[[1, 0, 0], [0, 1, 0]]], flip_v=False)
+    mat = Diffuse(Color(0.2, 0.2, 0.2), albedo_texture=texture)
+    hit = HitRecord.from_ray(
+        Ray(Vec3(0, 0, -5), Vec3(0, 0, 1)),
+        4.0,
+        Vec3(0, 0, -1),
+        uv=Vec2(0.0, 0.0),
+    )
+    _, attenuation = mat.scatter(None, hit)
+    assert vec3_approx_eq(attenuation, Color(1, 0, 0))
 
 
 # ─── Diffuse — scatter output ─────────────────────────────────────────────────
@@ -166,6 +179,7 @@ if __name__ == "__main__":
         test_material_is_abstract,
         test_diffuse_none_albedo_defaults_to_white,
         test_diffuse_custom_albedo_returned,
+        test_diffuse_texture_albedo_uses_hit_uv,
         test_scatter_returns_ray_and_attenuation,
         test_scatter_ray_origin_is_hit_point,
         test_scatter_ray_direction_is_unit_length,

@@ -4,7 +4,8 @@ import taichi as ti
 from rendering.taichi.fields import (
     _pixels, _obj_albedo, _obj_mat_type,
     _obj_roughness, _obj_ior, _obj_emission,
-    _accumulator, _frame_count, _ray_count,
+    _accumulator, _normal_accumulator, _albedo_accumulator, _depth_accumulator,
+    _frame_count, _ray_count,
     _mat_type, _mat_albedo, _mat_roughness, _mat_ior, _mat_emission,
     _light_center, _light_radius, _light_albedo, _light_emission, _n_lights,
 )
@@ -17,6 +18,43 @@ from rendering.taichi.scatter import (
 
 
 @ti.func
+def _sphere_light_sample(hit_p, center, radius):
+    to_center = center - hit_p
+    dist2 = ti.max(to_center.dot(to_center), 1e-6)
+    dist = ti.sqrt(dist2)
+    axis = to_center / dist
+
+    sin2_theta_max = ti.min(radius * radius / dist2, 1.0)
+    cos_theta_max = ti.sqrt(ti.max(0.0, 1.0 - sin2_theta_max))
+    cos_theta = 1.0 - ti.random() * (1.0 - cos_theta_max)
+    sin_theta = ti.sqrt(ti.max(0.0, 1.0 - cos_theta * cos_theta))
+    phi = 2.0 * math.pi * ti.random()
+
+    helper = ti.Vector([1.0, 0.0, 0.0])
+    if ti.abs(axis[0]) > 0.9:
+        helper = ti.Vector([0.0, 1.0, 0.0])
+    bitangent = axis.cross(helper).normalized()
+    tangent = bitangent.cross(axis)
+
+    light_dir = (
+        tangent * (ti.cos(phi) * sin_theta) +
+        bitangent * (ti.sin(phi) * sin_theta) +
+        axis * cos_theta
+    ).normalized()
+
+    oc = hit_p - center
+    half_b = oc.dot(light_dir)
+    c = oc.dot(oc) - radius * radius
+    discriminant = ti.max(half_b * half_b - c, 0.0)
+    t_light = -half_b - ti.sqrt(discriminant)
+
+    # Lambertian 1/pi folded into solid angle. For small lights this tends
+    # toward radius^2 / distance^2, matching the old center-sample scale.
+    solid_angle_over_pi = 2.0 * (1.0 - cos_theta_max)
+    return light_dir, t_light, solid_angle_over_pi
+
+
+@ti.func
 def direct_light_sample(hit_p, normal, albedo, direct_light_mode):
     direct = ti.Vector([0.0, 0.0, 0.0])
     light_count = _n_lights[None]
@@ -25,20 +63,17 @@ def direct_light_sample(hit_p, normal, albedo, direct_light_mode):
 
         for i in range(light_count):
             if direct_light_mode == 1 or i == selected_light:
-                to_light = _light_center[i] - hit_p
-                dist2 = ti.max(to_light.dot(to_light), 1e-6)
-                dist = ti.sqrt(dist2)
-                light_dir = to_light / dist
+                radius = _light_radius[i]
+                light_dir, t_light, solid_angle_scale = _sphere_light_sample(
+                    hit_p, _light_center[i], radius)
                 ndotl = normal.dot(light_dir)
 
                 if ndotl > 0.0:
-                    radius = _light_radius[i]
-                    max_t = dist - radius * 1.001
+                    max_t = t_light * 0.999
                     if max_t > 0.001:
                         shadow_origin = hit_p + normal * 1e-4
                         ti.atomic_add(_ray_count[None], 1)
                         if scene_occluded(shadow_origin, light_dir, max_t) == 0:
-                            solid_angle_scale = radius * radius / ti.max(dist2, radius * radius)
                             sample_weight = 1.0
                             if direct_light_mode == 0:
                                 sample_weight = ti.cast(light_count, ti.f32)
@@ -59,6 +94,9 @@ def trace(ro, rd, max_depth, use_sky, bg_color, direct_light_mode):
     color       = ti.Vector([0.0, 0.0, 0.0])
     throughput  = ti.Vector([1.0, 1.0, 1.0])
     current_ior = 1.0
+    first_normal = ti.Vector([0.0, 0.0, 0.0])
+    first_albedo = ti.Vector([0.0, 0.0, 0.0])
+    first_depth = 0.0
 
     for depth in range(max_depth):
         ti.atomic_add(_ray_count[None], 1)
@@ -96,6 +134,11 @@ def trace(ro, rd, max_depth, use_sky, bg_color, direct_light_mode):
             roughness = _obj_roughness[idx]
             ior       = _obj_ior[idx]
             emission  = _obj_emission[idx]
+
+        if depth == 0:
+            first_normal = normal
+            first_albedo = albedo
+            first_depth = t
 
         # ── Shading ───────────────────────────────────────────────────────────
         if mat_type == 3:   # emissive
@@ -136,7 +179,7 @@ def trace(ro, rd, max_depth, use_sky, bg_color, direct_light_mode):
 
         ro = hit_p + normal * 1e-4
 
-    return color
+    return color, first_normal, first_albedo, first_depth
 
 
 @ti.kernel
@@ -157,14 +200,27 @@ def render_kernel(
     for y, x in ti.ndrange(H, W):
         rd = get_ray_direction(x, y, W, H, frame, fov_tan, aspect,
                                cam_fwd, cam_right, cam_up)
-        sample = trace(cam_pos, rd, max_depth, use_sky, bg_color, direct_light_mode)
+        sample, normal_sample, albedo_sample, depth_sample = trace(
+            cam_pos, rd, max_depth, use_sky, bg_color, direct_light_mode)
         if sample_clamp > 0.0:
             limit = ti.Vector([sample_clamp, sample_clamp, sample_clamp])
             sample = ti.min(ti.max(sample, ti.Vector([0.0, 0.0, 0.0])), limit)
 
         if frame == 0:
             _accumulator[y, x] = sample
+            _normal_accumulator[y, x] = normal_sample
+            _albedo_accumulator[y, x] = albedo_sample
+            _depth_accumulator[y, x] = depth_sample
         else:
             _accumulator[y, x] = (_accumulator[y, x] * frame + sample) / (frame + 1)
+            _normal_accumulator[y, x] = (
+                _normal_accumulator[y, x] * frame + normal_sample
+            ) / (frame + 1)
+            _albedo_accumulator[y, x] = (
+                _albedo_accumulator[y, x] * frame + albedo_sample
+            ) / (frame + 1)
+            _depth_accumulator[y, x] = (
+                _depth_accumulator[y, x] * frame + depth_sample
+            ) / (frame + 1)
 
         _pixels[y, x] = ti.sqrt(ti.min(_accumulator[y, x], 1.0))

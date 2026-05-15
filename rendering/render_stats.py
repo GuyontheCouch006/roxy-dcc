@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -15,6 +16,11 @@ class RenderStats:
     bvh_triangles: int = 0
     bvh_materials: int = 0
     bvh_leaf_size: int = 0
+    adaptive_sampling: bool = False
+    adaptive_stopped: bool = False
+    adaptive_threshold: float = 0.0
+    adaptive_error: Optional[float] = None
+    adaptive_min_samples: int = 0
 
     @property
     def pixel_count(self):
@@ -33,7 +39,7 @@ class RenderStats:
         return self.rays_cast / self.elapsed_seconds
 
     def format_report(self):
-        return "\n".join([
+        lines = [
             "Render report",
             f"  resolution:      {self.width} x {self.height}",
             f"  samples:         {self.samples_rendered} / {self.samples_requested}",
@@ -47,4 +53,12 @@ class RenderStats:
             f"  BVH triangles:   {self.bvh_triangles:,}",
             f"  BVH materials:   {self.bvh_materials:,}",
             f"  BVH leaf size:   {self.bvh_leaf_size:,}",
-        ])
+        ]
+        if self.adaptive_sampling:
+            error = "n/a" if self.adaptive_error is None else f"{self.adaptive_error:.6f}"
+            lines.extend([
+                f"  adaptive stop:   {'yes' if self.adaptive_stopped else 'no'}",
+                f"  adaptive error:  {error}",
+                f"  adaptive target: {self.adaptive_threshold:.6f}",
+            ])
+        return "\n".join(lines)

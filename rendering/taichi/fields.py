@@ -11,6 +11,9 @@ MAX_LIGHTS    = 4_096
 
 _pixels = ti.Vector.field(3, dtype=ti.f32, shape=(MAX_H, MAX_W))
 _accumulator = ti.Vector.field(3, dtype=ti.f32, shape=(MAX_H, MAX_W))
+_normal_accumulator = ti.Vector.field(3, dtype=ti.f32, shape=(MAX_H, MAX_W))
+_albedo_accumulator = ti.Vector.field(3, dtype=ti.f32, shape=(MAX_H, MAX_W))
+_depth_accumulator = ti.field(dtype=ti.f32, shape=(MAX_H, MAX_W))
 _frame_count  = ti.field(dtype=ti.i32, shape=())
 _ray_count    = ti.field(dtype=ti.i32, shape=())
 

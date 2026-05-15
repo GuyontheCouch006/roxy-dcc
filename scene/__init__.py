@@ -13,4 +13,5 @@ from scene.world import World
 from scene.camera import Camera
 from scene.materials import (Material, Diffuse, Metal, Dielectric,
                               Emissive, Glossy, create_material_from_dict)
+from scene.textures import ImageTexture, create_texture_from_dict
 from scene.io import load_scene, save_scene

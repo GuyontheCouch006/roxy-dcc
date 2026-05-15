@@ -1,4 +1,5 @@
 import time
+import math
 import random
 from dataclasses import dataclass
 from multiprocessing import Pool
@@ -21,6 +22,21 @@ class _SphereLight:
     radius: float
     color: Color
     intensity: float
+
+
+@dataclass(frozen=True)
+class _SphereLightSample:
+    point: Point3
+    normal: Point3
+    direction: Point3
+    distance: float
+    geometry_term: float
+    area_pdf: float
+    solid_angle_pdf: float
+
+
+_SHADOW_EPSILON = 1e-4
+_PDF_EPSILON = 1e-12
 
 
 def _init_worker(world, camera, lights, direct_light_mode, sample_clamp):
@@ -61,30 +77,103 @@ def _collect_emissive_sphere_lights(world):
     return lights
 
 
+def _orthonormal_basis(w):
+    helper = Point3(0, 1, 0) if abs(w.x) > 0.9 else Point3(1, 0, 0)
+    bitangent = w.cross(helper).normalize()
+    tangent = bitangent.cross(w)
+    return tangent, bitangent
+
+
+def _sample_sphere_light_surface(hit_point, light):
+    to_center = light.center - hit_point
+    center_dist2 = max(to_center.length_sq(), _PDF_EPSILON)
+    radius2 = light.radius * light.radius
+    if center_dist2 <= radius2 + _PDF_EPSILON:
+        return None
+
+    center_dist = math.sqrt(center_dist2)
+    center_dir = to_center / center_dist
+    sin_theta_max2 = min(1.0, radius2 / center_dist2)
+    cos_theta_max = math.sqrt(max(0.0, 1.0 - sin_theta_max2))
+    solid_angle = 2.0 * math.pi * (1.0 - cos_theta_max)
+    if solid_angle <= _PDF_EPSILON:
+        return None
+
+    u1 = random.random()
+    u2 = random.random()
+    cos_theta = 1.0 - u1 * (1.0 - cos_theta_max)
+    sin_theta = math.sqrt(max(0.0, 1.0 - cos_theta * cos_theta))
+    phi = 2.0 * math.pi * u2
+
+    tangent, bitangent = _orthonormal_basis(center_dir)
+    direction = (
+        tangent * (math.cos(phi) * sin_theta) +
+        bitangent * (math.sin(phi) * sin_theta) +
+        center_dir * cos_theta
+    ).normalize()
+
+    projection = to_center.dot(direction)
+    closest_dist2 = center_dist2 - projection * projection
+    hit_offset2 = radius2 - closest_dist2
+    if hit_offset2 < -_PDF_EPSILON:
+        return None
+
+    distance = projection - math.sqrt(max(0.0, hit_offset2))
+    if distance <= _SHADOW_EPSILON:
+        return None
+
+    point = hit_point + direction * distance
+    normal = (point - light.center).normalize()
+    light_cos = max(0.0, (-direction).dot(normal))
+    if light_cos <= _PDF_EPSILON:
+        return None
+
+    geometry_term = light_cos / max(distance * distance, _PDF_EPSILON)
+    solid_angle_pdf = 1.0 / solid_angle
+    area_pdf = solid_angle_pdf * geometry_term
+    if area_pdf <= _PDF_EPSILON:
+        return None
+
+    return _SphereLightSample(
+        point=point,
+        normal=normal,
+        direction=direction,
+        distance=distance,
+        geometry_term=geometry_term,
+        area_pdf=area_pdf,
+        solid_angle_pdf=solid_angle_pdf,
+    )
+
+
 def _direct_light_sample_one(hit, world, light, albedo, sample_weight):
-    to_light = light.center - hit.point
-    dist2 = max(to_light.length_sq(), 1e-6)
-    dist = dist2 ** 0.5
-    light_dir = to_light / dist
-    ndotl = hit.normal.dot(light_dir)
+    sample = _sample_sphere_light_surface(hit.point, light)
+    if sample is None:
+        return Color(0, 0, 0), 0
+
+    ndotl = hit.normal.dot(sample.direction)
     if ndotl <= 0:
         return Color(0, 0, 0), 0
 
-    max_t = dist - light.radius * 1.001
+    shadow_origin = hit.point + hit.normal * _SHADOW_EPSILON
+    to_sample = sample.point - shadow_origin
+    shadow_dist = to_sample.length()
+    max_t = shadow_dist - _SHADOW_EPSILON
     if max_t <= 0.001:
         return Color(0, 0, 0), 0
 
-    shadow_ray = Ray(hit.point + hit.normal * 1e-4, light_dir)
+    shadow_ray = Ray(shadow_origin, to_sample)
     if world.occluded(shadow_ray, max_t):
         return Color(0, 0, 0), 1
 
-    solid_angle_scale = light.radius * light.radius / max(dist2, light.radius * light.radius)
+    light_pdf = sample.area_pdf
     contribution = (
         albedo *
         light.color *
         light.intensity *
         ndotl *
-        solid_angle_scale *
+        sample.geometry_term *
+        (1.0 / math.pi) *
+        (1.0 / light_pdf) *
         sample_weight
     )
     return contribution, 1
@@ -106,20 +195,33 @@ def _direct_light_sample(hit, world, lights, albedo, direct_light_mode):
     return _direct_light_sample_one(hit, world, random.choice(lights), albedo, len(lights))
 
 
-def _trace(ray, world, max_depth, lights=None, direct_light_mode="one", depth=0):
+def _guide_tuple(color, rays_cast, collect_guides,
+                 normal=None, albedo=None, depth_value=0.0):
+    if collect_guides:
+        normal = normal or Color(0, 0, 0)
+        albedo = albedo or Color(0, 0, 0)
+        return color, rays_cast, normal, albedo, depth_value
+    return color, rays_cast
+
+
+def _trace(ray, world, max_depth, lights=None, direct_light_mode="one", depth=0,
+           collect_guides=False):
     if depth >= max_depth:
-        return Color(0, 0, 0), 0
+        return _guide_tuple(Color(0, 0, 0), 0, collect_guides)
 
     rays_cast = 1
     hit = world.intersect(ray)
     if hit is None:
-        return world.sky_color(ray), rays_cast
+        return _guide_tuple(world.sky_color(ray), rays_cast, collect_guides)
 
     mat      = hit.material
     emission = mat.emitted() if hasattr(mat, 'emitted') else Color(0, 0, 0)
     result   = mat.scatter(ray, hit)
     if result is None:
-        return emission, rays_cast
+        return _guide_tuple(
+            emission, rays_cast, collect_guides,
+            normal=hit.normal, albedo=emission, depth_value=hit.t,
+        )
 
     scattered, attenuation = result
     direct = Color(0, 0, 0)
@@ -135,17 +237,27 @@ def _trace(ray, world, max_depth, lights=None, direct_light_mode="one", depth=0)
     if depth > 2:
         survival = max(attenuation[0], attenuation[1], attenuation[2])
         if survival < 0.1:
-            return emission, rays_cast
+            return _guide_tuple(
+                emission, rays_cast, collect_guides,
+                normal=hit.normal, albedo=attenuation, depth_value=hit.t,
+            )
         attenuation = attenuation / survival
 
     bounced, bounce_rays = _trace(scattered, world, max_depth, lights, direct_light_mode, depth + 1)
-    return emission + direct + attenuation * bounced, rays_cast + bounce_rays
+    color = emission + direct + attenuation * bounced
+    return _guide_tuple(
+        color, rays_cast + bounce_rays, collect_guides,
+        normal=hit.normal, albedo=attenuation, depth_value=hit.t,
+    )
 
 
 def _trace_band_worker(args):
     """One sample per pixel, returns raw linear colors (no gamma)."""
     y_start, y_end, width, height, max_depth, frame = args
     band = np.zeros((y_end - y_start, width, 3), dtype=np.float32)
+    normal_band = np.zeros_like(band)
+    albedo_band = np.zeros_like(band)
+    depth_band = np.zeros((y_end - y_start, width), dtype=np.float32)
     rays_cast = 0
     for y in range(y_start, y_end):
         for x in range(width):
@@ -153,19 +265,25 @@ def _trace_band_worker(args):
                 x, y, width, height,
                 jitter=pixel_sample_offset(x, y, frame),
             )
-            c, ray_count = _trace(
-                ray, _worker_world, max_depth, _worker_lights, _worker_direct_light_mode)
+            c, ray_count, normal, albedo, depth_value = _trace(
+                ray, _worker_world, max_depth, _worker_lights,
+                _worker_direct_light_mode, collect_guides=True)
             c = clamp_color_sample(c, _worker_sample_clamp)
             rays_cast += ray_count
             band[y - y_start, x] = (c[0], c[1], c[2])
-    return y_start, band, rays_cast
+            normal_band[y - y_start, x] = (normal[0], normal[1], normal[2])
+            albedo_band[y - y_start, x] = (albedo[0], albedo[1], albedo[2])
+            depth_band[y - y_start, x] = depth_value
+    return y_start, band, normal_band, albedo_band, depth_band, rays_cast
 
 
 class RayTracer:
     def __init__(self, world, image, viewport, samples=64, max_depth=8, threaded=True,
                  direct_light_mode="one", denoise=False,
                  denoise_radius=1, denoise_sigma=0.08, denoise_amount=0.8,
-                 sample_clamp=10.0):
+                 sample_clamp=10.0, adaptive_sampling=False,
+                 adaptive_min_samples=4, adaptive_threshold=0.002,
+                 adaptive_check_interval=1):
         self._world     = world
         self._image     = image
         self._viewport  = viewport
@@ -181,11 +299,25 @@ class RayTracer:
         self._denoise_sigma = denoise_sigma
         self._denoise_amount = denoise_amount
         self._sample_clamp = sample_clamp
+        if adaptive_min_samples < 1:
+            raise ValueError("adaptive_min_samples must be at least 1")
+        if adaptive_threshold < 0:
+            raise ValueError("adaptive_threshold must be non-negative")
+        if adaptive_check_interval < 1:
+            raise ValueError("adaptive_check_interval must be at least 1")
+        self._adaptive_sampling = adaptive_sampling
+        self._adaptive_min_samples = adaptive_min_samples
+        self._adaptive_threshold = adaptive_threshold
+        self._adaptive_check_interval = adaptive_check_interval
+        self._adaptive_stopped = False
+        self._last_adaptive_error = None
         self._last_ray_count = 0
         self._last_stats = None
         self._lights = _collect_emissive_sphere_lights(world)
 
     def render(self):
+        self._adaptive_stopped = False
+        self._last_adaptive_error = None
         if self._threaded:
             self._render_threaded()
         else:
@@ -194,9 +326,13 @@ class RayTracer:
     def _render_single(self):
         W, H  = self._image.width, self._image.height
         accum = np.zeros((H, W, 3), dtype=np.float32)
+        normal_accum = np.zeros_like(accum)
+        albedo_accum = np.zeros_like(accum)
+        depth_accum = np.zeros((H, W), dtype=np.float32)
         rays_cast = 0
         frames_rendered = 0
         render_start = time.perf_counter()
+        previous_accum = None
 
         for frame in range(self._samples):
             frames_rendered = frame + 1
@@ -206,34 +342,53 @@ class RayTracer:
                         x, y, W, H,
                         jitter=pixel_sample_offset(x, y, frame),
                     )
-                    c, ray_count = _trace(
+                    c, ray_count, normal, albedo, depth_value = _trace(
                         ray, self._world, self._max_depth, self._lights,
-                        self._direct_light_mode)
+                        self._direct_light_mode, collect_guides=True)
                     c = clamp_color_sample(c, self._sample_clamp)
                     rays_cast += ray_count
                     accum[y, x] = (accum[y, x] * frame + [c[0], c[1], c[2]]) / (frame + 1)
+                    normal_accum[y, x] = (
+                        normal_accum[y, x] * frame + [normal[0], normal[1], normal[2]]
+                    ) / (frame + 1)
+                    albedo_accum[y, x] = (
+                        albedo_accum[y, x] * frame + [albedo[0], albedo[1], albedo[2]]
+                    ) / (frame + 1)
+                    depth_accum[y, x] = (
+                        depth_accum[y, x] * frame + depth_value
+                    ) / (frame + 1)
 
             self._image.pixels[:] = np.sqrt(np.minimum(accum, 1.0))
+            should_stop = self._adaptive_should_stop(previous_accum, accum, frames_rendered)
+            previous_accum = self._adaptive_snapshot(accum)
             print(f"\r  sample {frame + 1}/{self._samples}", end='', flush=True)
 
             if self._viewport:
                 self._viewport.update(self._image)
                 self._viewport.poll_events()
                 if self._viewport.should_close:
-                    self._apply_final_pixels(accum)
+                    self._apply_final_pixels(accum, normal_accum, albedo_accum, depth_accum)
                     self._finish_stats(W, H, frames_rendered, rays_cast, render_start)
                     return
 
-        self._apply_final_pixels(accum)
+            if should_stop:
+                self._adaptive_stopped = True
+                break
+
+        self._apply_final_pixels(accum, normal_accum, albedo_accum, depth_accum)
         self._finish_stats(W, H, frames_rendered, rays_cast, render_start)
 
     def _render_threaded(self):
         W, H      = self._image.width, self._image.height
         band_size = 6
         accum     = np.zeros((H, W, 3), dtype=np.float32)
+        normal_accum = np.zeros_like(accum)
+        albedo_accum = np.zeros_like(accum)
+        depth_accum = np.zeros((H, W), dtype=np.float32)
         rays_cast = 0
         frames_rendered = 0
         render_start = time.perf_counter()
+        previous_accum = None
 
         band_ranges = [
             (y, min(y + band_size, H), W, H, self._max_depth)
@@ -251,14 +406,27 @@ class RayTracer:
             for frame in range(self._samples):
                 frames_rendered = frame + 1
                 tasks = [(*band, frame) for band in band_ranges]
-                for y_start, band, band_rays in pool.imap_unordered(_trace_band_worker, tasks):
+                for (
+                    y_start, band, normal_band, albedo_band, depth_band, band_rays
+                ) in pool.imap_unordered(_trace_band_worker, tasks):
                     rays_cast += band_rays
                     y_end = y_start + len(band)
                     accum[y_start:y_end] = (accum[y_start:y_end] * frame + band) / (frame + 1)
+                    normal_accum[y_start:y_end] = (
+                        normal_accum[y_start:y_end] * frame + normal_band
+                    ) / (frame + 1)
+                    albedo_accum[y_start:y_end] = (
+                        albedo_accum[y_start:y_end] * frame + albedo_band
+                    ) / (frame + 1)
+                    depth_accum[y_start:y_end] = (
+                        depth_accum[y_start:y_end] * frame + depth_band
+                    ) / (frame + 1)
                     self._image.pixels[y_start:y_end] = np.sqrt(
                         np.minimum(accum[y_start:y_end], 1.0)
                     )
 
+                should_stop = self._adaptive_should_stop(previous_accum, accum, frames_rendered)
+                previous_accum = self._adaptive_snapshot(accum)
                 print(f"\r  sample {frame + 1}/{self._samples}", end='', flush=True)
 
                 if self._viewport:
@@ -266,20 +434,44 @@ class RayTracer:
                     self._viewport.poll_events()
                     if self._viewport.should_close:
                         pool.terminate()
-                        self._apply_final_pixels(accum)
+                        self._apply_final_pixels(accum, normal_accum, albedo_accum, depth_accum)
                         self._finish_stats(W, H, frames_rendered, rays_cast, render_start)
                         return
 
-        self._apply_final_pixels(accum)
+                if should_stop:
+                    self._adaptive_stopped = True
+                    break
+
+        self._apply_final_pixels(accum, normal_accum, albedo_accum, depth_accum)
         self._finish_stats(W, H, frames_rendered, rays_cast, render_start)
 
-    def _apply_final_pixels(self, accum):
+    def _adaptive_snapshot(self, accum):
+        if not self._adaptive_sampling:
+            return None
+        return accum.copy()
+
+    def _adaptive_should_stop(self, previous_accum, accum, samples_rendered):
+        if not self._adaptive_sampling or previous_accum is None:
+            return False
+        self._last_adaptive_error = float(np.mean(np.abs(accum - previous_accum)))
+        if samples_rendered >= self._samples:
+            return False
+        if samples_rendered < self._adaptive_min_samples:
+            return False
+        if (samples_rendered - self._adaptive_min_samples) % self._adaptive_check_interval != 0:
+            return False
+        return self._last_adaptive_error <= self._adaptive_threshold
+
+    def _apply_final_pixels(self, accum, normal=None, albedo=None, depth=None):
         if self._denoise:
             accum = edge_aware_denoise(
                 accum,
                 radius=self._denoise_radius,
                 sigma_color=self._denoise_sigma,
                 amount=self._denoise_amount,
+                normal=normal,
+                albedo=albedo,
+                depth=depth,
             )
         self._image.pixels[:] = linear_to_display(accum)
 
@@ -293,6 +485,11 @@ class RayTracer:
             max_depth=self._max_depth,
             rays_cast=rays_cast,
             elapsed_seconds=time.perf_counter() - render_start,
+            adaptive_sampling=self._adaptive_sampling,
+            adaptive_stopped=self._adaptive_stopped,
+            adaptive_threshold=self._adaptive_threshold,
+            adaptive_error=self._last_adaptive_error,
+            adaptive_min_samples=self._adaptive_min_samples,
         )
         print("\n" + self._last_stats.format_report())
 

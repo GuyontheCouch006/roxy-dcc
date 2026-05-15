@@ -1,5 +1,5 @@
 from core import Color
-from rendering.sampling import clamp_color_sample, pixel_sample_offset
+from rendering.sampling import clamp_color_sample, mis_power_weight, pixel_sample_offset
 from tests.utils import run_tests, approx_eq
 
 
@@ -35,6 +35,16 @@ def test_clamp_color_sample_limits_extremes():
     assert approx_eq(clamped.b, 2.0)
 
 
+def test_mis_power_weight_handles_equal_pdfs():
+    assert approx_eq(mis_power_weight(2.0, 2.0), 0.5)
+
+
+def test_mis_power_weight_handles_zero_pdfs():
+    assert approx_eq(mis_power_weight(0.0, 4.0), 0.0)
+    assert approx_eq(mis_power_weight(4.0, 0.0), 1.0)
+    assert approx_eq(mis_power_weight(0.0, 0.0), 0.0)
+
+
 if __name__ == "__main__":
     tests = [
         test_pixel_sample_offset_is_inside_pixel,
@@ -42,5 +52,7 @@ if __name__ == "__main__":
         test_pixel_sample_offset_changes_by_pixel,
         test_clamp_color_sample_can_be_disabled,
         test_clamp_color_sample_limits_extremes,
+        test_mis_power_weight_handles_equal_pdfs,
+        test_mis_power_weight_handles_zero_pdfs,
     ]
     run_tests(tests)

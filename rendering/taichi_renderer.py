@@ -12,7 +12,10 @@ import taichi as ti
 
 import core.timing as timing
 from rendering.taichi import render_kernel, extract_scene
-from rendering.taichi.fields import _pixels, _accumulator, _frame_count, _ray_count
+from rendering.taichi.fields import (
+    _pixels, _accumulator, _normal_accumulator, _albedo_accumulator,
+    _depth_accumulator, _frame_count, _ray_count,
+)
 from rendering.denoise import edge_aware_denoise, linear_to_display
 from rendering.render_stats import RenderStats
 
@@ -63,6 +66,9 @@ class TaichiRenderer:
             radius=self._denoise_radius,
             sigma_color=self._denoise_sigma,
             amount=self._denoise_amount,
+            normal=_normal_accumulator.to_numpy()[:H, :W],
+            albedo=_albedo_accumulator.to_numpy()[:H, :W],
+            depth=_depth_accumulator.to_numpy()[:H, :W],
         )
         return linear_to_display(linear_pixels)
 

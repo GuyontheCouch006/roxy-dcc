@@ -1,7 +1,9 @@
 
 from dataclasses import dataclass
+from pathlib import Path
 from core import Color
 from scene.materials import Diffuse, Metal, Dielectric, Emissive, Glossy
+from scene.textures import ImageTexture
 
 @dataclass
 class MTLMaterial:
@@ -19,23 +21,27 @@ class MTLMaterial:
     map_kd: str   = None   # diffuse texture path (store but don't load yet)
 
     def to_material(self):
+        texture = ImageTexture(self.map_kd) if self.map_kd else None
         if self.ke and (self.ke.r > 0 or self.ke.g > 0 or self.ke.b > 0):
-            return Emissive(self.ke, intensity=1.0)
+            return Emissive(self.ke, intensity=1.0, albedo_texture=texture)
         if self.d < 0.99:
             albedo = self.tf if self.tf else Color(1, 1, 1)
-            return Dielectric(albedo, ior=self.ni)
+            return Dielectric(albedo, ior=self.ni, albedo_texture=texture)
         if self.illum in (3, 4, 5):
             roughness = max(0.0, 1.0 - self.ns / 1000.0)
-            return Metal(self.kd or Color(1,1,1), roughness=roughness)
+            return Metal(self.kd or Color(1,1,1), roughness=roughness,
+                         albedo_texture=texture)
         if self.ks and (self.ks.r > 0 or self.ks.g > 0 or self.ks.b > 0):
             roughness = max(0.0, 1.0 - self.ns / 1000.0)
-            return Glossy(self.kd or Color(1,1,1), roughness=roughness)
-        return Diffuse(self.kd or Color(0.8, 0.8, 0.8))
+            return Glossy(self.kd or Color(1,1,1), roughness=roughness,
+                          albedo_texture=texture)
+        return Diffuse(self.kd or Color(0.8, 0.8, 0.8), albedo_texture=texture)
     
 class MTLLoader:
     @staticmethod
     def load(path) -> dict:
         """Parse a .mtl file and return dict of material name → Material."""
+        base_dir = Path(path).parent
         materials = []
         current_material = None
         with open(path, 'r') as f:
@@ -63,7 +69,7 @@ class MTLLoader:
                 if parts[0] == 'illum':
                     current_material.illum = int(parts[1])
                 if parts[0] in ('map_kd', 'map_Kd'):
-                    current_material.map_kd = parts[1]
+                    current_material.map_kd = str(base_dir / parts[-1])
                 if parts[0] == 'Ka':
                     r,g,b = parts[1:]
                     color = Color(float(r), float(g), float(b))

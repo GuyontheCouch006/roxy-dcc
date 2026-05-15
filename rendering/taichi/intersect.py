@@ -15,14 +15,18 @@ from rendering.taichi.fields import (
 
 
 @ti.func
-def aabb_hit(ro, rd, aabb_min, aabb_max):
+def make_inv_dir(rd):
     inv_d = ti.Vector([0.0, 0.0, 0.0])
     for k in ti.static(range(3)):
         if ti.abs(rd[k]) > 1e-10:
             inv_d[k] = 1.0 / rd[k]
         else:
             inv_d[k] = 1e30
+    return inv_d
 
+
+@ti.func
+def aabb_hit_tmax_inv(ro, inv_d, aabb_min, aabb_max, t_max_limit):
     t_min = (aabb_min - ro) * inv_d
     t_max = (aabb_max - ro) * inv_d
 
@@ -32,7 +36,22 @@ def aabb_hit(ro, rd, aabb_min, aabb_max):
     t_enter = ti.max(t1[0], ti.max(t1[1], t1[2]))
     t_exit  = ti.min(t2[0], ti.min(t2[1], t2[2]))
 
-    return t_exit >= t_enter and t_exit >= 0.001
+    return (
+        t_exit >= t_enter and
+        t_exit >= 0.001 and
+        t_enter <= t_max_limit
+    ), t_enter
+
+
+@ti.func
+def aabb_hit_tmax(ro, rd, aabb_min, aabb_max, t_max_limit):
+    return aabb_hit_tmax_inv(ro, make_inv_dir(rd), aabb_min, aabb_max, t_max_limit)
+
+
+@ti.func
+def aabb_hit(ro, rd, aabb_min, aabb_max):
+    hit, t_enter = aabb_hit_tmax(ro, rd, aabb_min, aabb_max, 1e9)
+    return hit
 
 
 @ti.func
@@ -63,20 +82,29 @@ def bvh_triangle_intersect(ro, rd, v0, v1, v2):
 def bvh_intersect(ro, rd):
     """Traverse BVH with an explicit stack. Returns (t, tri_idx, u, v)."""
     # Stack depth 64 handles trees up to depth 32 (2 children pushed per level).
-    stack     = ti.Vector.zero(ti.i32, 64)
-    stack_ptr = 0
-    stack[0]  = 0   # start at root
+    stack      = ti.Vector.zero(ti.i32, 64)
+    stack_t    = ti.Vector.zero(ti.f32, 64)
+    stack_ptr  = -1
+    inv_d      = make_inv_dir(rd)
 
     closest_t   = 1e9
     closest_idx = -1
     closest_u   = 0.0
     closest_v   = 0.0
 
+    root_hit, root_t = aabb_hit_tmax_inv(
+        ro, inv_d, _bvh_aabb_min[0], _bvh_aabb_max[0], closest_t)
+    if root_hit:
+        stack_ptr += 1
+        stack[stack_ptr] = 0
+        stack_t[stack_ptr] = root_t
+
     while stack_ptr >= 0:
         node_idx  = stack[stack_ptr]
+        node_t    = stack_t[stack_ptr]
         stack_ptr -= 1
 
-        if not aabb_hit(ro, rd, _bvh_aabb_min[node_idx], _bvh_aabb_max[node_idx]):
+        if node_t > closest_t:
             continue
 
         if _bvh_tri_count[node_idx] > 0:   # leaf
@@ -89,11 +117,37 @@ def bvh_intersect(ro, rd):
                     closest_idx = i
                     closest_u   = u
                     closest_v   = v
-        else:                               # interior — push both children
-            stack_ptr += 1
-            stack[stack_ptr] = _bvh_left[node_idx]
-            stack_ptr += 1
-            stack[stack_ptr] = _bvh_right[node_idx]
+        else:
+            left = _bvh_left[node_idx]
+            right = _bvh_right[node_idx]
+            left_hit, left_t = aabb_hit_tmax_inv(
+                ro, inv_d, _bvh_aabb_min[left], _bvh_aabb_max[left], closest_t)
+            right_hit, right_t = aabb_hit_tmax_inv(
+                ro, inv_d, _bvh_aabb_min[right], _bvh_aabb_max[right], closest_t)
+
+            if left_hit and right_hit:
+                if left_t < right_t:
+                    stack_ptr += 1
+                    stack[stack_ptr] = right
+                    stack_t[stack_ptr] = right_t
+                    stack_ptr += 1
+                    stack[stack_ptr] = left
+                    stack_t[stack_ptr] = left_t
+                else:
+                    stack_ptr += 1
+                    stack[stack_ptr] = left
+                    stack_t[stack_ptr] = left_t
+                    stack_ptr += 1
+                    stack[stack_ptr] = right
+                    stack_t[stack_ptr] = right_t
+            elif left_hit:
+                stack_ptr += 1
+                stack[stack_ptr] = left
+                stack_t[stack_ptr] = left_t
+            elif right_hit:
+                stack_ptr += 1
+                stack[stack_ptr] = right
+                stack_t[stack_ptr] = right_t
 
     return closest_t, closest_idx, closest_u, closest_v
 
@@ -104,14 +158,23 @@ def bvh_occluded(ro, rd, max_t):
     occluded = 0
 
     stack     = ti.Vector.zero(ti.i32, 64)
-    stack_ptr = 0
-    stack[0]  = 0
+    stack_t   = ti.Vector.zero(ti.f32, 64)
+    stack_ptr = -1
+    inv_d     = make_inv_dir(rd)
+
+    root_hit, root_t = aabb_hit_tmax_inv(
+        ro, inv_d, _bvh_aabb_min[0], _bvh_aabb_max[0], max_t)
+    if root_hit:
+        stack_ptr += 1
+        stack[stack_ptr] = 0
+        stack_t[stack_ptr] = root_t
 
     while stack_ptr >= 0 and occluded == 0:
         node_idx  = stack[stack_ptr]
+        node_t    = stack_t[stack_ptr]
         stack_ptr -= 1
 
-        if not aabb_hit(ro, rd, _bvh_aabb_min[node_idx], _bvh_aabb_max[node_idx]):
+        if node_t > max_t:
             continue
 
         if _bvh_tri_count[node_idx] > 0:
@@ -122,10 +185,36 @@ def bvh_occluded(ro, rd, max_t):
                 if 0.001 < t < max_t:
                     occluded = 1
         else:
-            stack_ptr += 1
-            stack[stack_ptr] = _bvh_left[node_idx]
-            stack_ptr += 1
-            stack[stack_ptr] = _bvh_right[node_idx]
+            left = _bvh_left[node_idx]
+            right = _bvh_right[node_idx]
+            left_hit, left_t = aabb_hit_tmax_inv(
+                ro, inv_d, _bvh_aabb_min[left], _bvh_aabb_max[left], max_t)
+            right_hit, right_t = aabb_hit_tmax_inv(
+                ro, inv_d, _bvh_aabb_min[right], _bvh_aabb_max[right], max_t)
+
+            if left_hit and right_hit:
+                if left_t < right_t:
+                    stack_ptr += 1
+                    stack[stack_ptr] = right
+                    stack_t[stack_ptr] = right_t
+                    stack_ptr += 1
+                    stack[stack_ptr] = left
+                    stack_t[stack_ptr] = left_t
+                else:
+                    stack_ptr += 1
+                    stack[stack_ptr] = left
+                    stack_t[stack_ptr] = left_t
+                    stack_ptr += 1
+                    stack[stack_ptr] = right
+                    stack_t[stack_ptr] = right_t
+            elif left_hit:
+                stack_ptr += 1
+                stack[stack_ptr] = left
+                stack_t[stack_ptr] = left_t
+            elif right_hit:
+                stack_ptr += 1
+                stack[stack_ptr] = right
+                stack_t[stack_ptr] = right_t
 
     return occluded
 
