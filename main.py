@@ -1,5 +1,5 @@
-USE_TAICHI  = True
-DEBUG_LEVEL = 1   # 0=off  1=milestone timers  2=timers + cProfile
+USE_TAICHI  = False
+DEBUG_LEVEL = 0   # 0=off  1=milestone timers  2=timers + cProfile
 
 import random
 import core.timing as timing
@@ -347,29 +347,60 @@ def build_bicycle(W, H):
     return world
 
 
-def main():
-    W, H = 1920, 1080
+def build_gallery(W, H):
+    OBJ = "sample_scenes/gallery/gallery.obj"
+    root = OBJReader.load(OBJ)
+    debug_scene_object(root)
 
-    with timing.timed("build_bicycle", tag="scene"):
-        world = build_bicycle(W, H)
+    world = World(use_sky=False)
+    world.add_object(root)
+
+    # Gallery bounding box: X -6.2→5.0, Y 0.06→6.26, Z -14.0→11.4
+    # Warm overhead strip lights along the central axis just below the ceiling
+    warm_white = Color(1.00, 0.96, 0.88)
+    for z in range(-12, 10, 4):
+        world.add_object(SceneObject(
+            shape=Sphere(1.0),
+            material=Emissive(warm_white, intensity=25.0),
+            translation=Vec3(-0.6, 5.7, float(z)),
+            scale=Vec3(0.25, 0.25, 0.25),
+            name=f"ceiling_light_{z}",
+        ))
+
+    camera = Camera(
+        position=Point3(-0.9, 1.7, 9.0),
+        forward=Vec3(0.0, -0.05, -1.0),
+        fov=70,
+        width=W,
+        height=H,
+    )
+    world.add_camera(camera)
+    return world
+
+
+def main():
+    W, H = int(1920), int(1080)
+
+    with timing.timed("build_gallery", tag="scene"):
+        world = build_gallery(W, H)
 
     image    = Image(W, H)
-    viewport = GLViewport(W, H, "Road Bike")
+    viewport = GLViewport(W, H, "Picture Gallery – Hallwyl Museum")
 
-    world.use_sky = False
     if USE_TAICHI:
         tracer = TaichiRenderer(
             world, image, viewport,
-            samples=3000,
-            max_depth=12,
-            direct_light_mode="all",
+            samples=2000,
+            max_depth=5,
+            direct_light_max_depth=1,
+            direct_light_mode="one",
             denoise=True,
         )
     else:
         tracer = RayTracer(
             world, image, viewport,
-            samples=128,
-            max_depth=10,
+            samples=64,
+            max_depth=8,
             direct_light_mode="all",
             denoise=True,
         )
