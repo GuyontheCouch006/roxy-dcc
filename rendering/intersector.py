@@ -319,7 +319,7 @@ class EmbreeIntersector(SceneIntersector):
                     directions,
                     query="OCCLUDED",
                     max_ts=max_ts,
-                    output=True,
+                    output=False,
                 )
                 return self._occlusion_from_embree_result(result, max_ts)
             except Exception:
@@ -464,8 +464,14 @@ class EmbreeIntersector(SceneIntersector):
         count = len(max_ts)
         if isinstance(result, np.ndarray) and result.dtype == np.bool_:
             return _as_result_vector(result, count).astype(np.bool_, copy=False)
+        if isinstance(result, np.ndarray):
+            prim_ids = _as_result_vector(result, count).astype(np.int64, copy=False)
+            return (prim_ids >= 0) & (prim_ids < self.triangle_count)
         if isinstance(result, (list, tuple)) and result and isinstance(result[0], bool):
             return np.asarray(result, dtype=np.bool_)
+        if isinstance(result, (list, tuple)):
+            prim_ids = np.asarray(result, dtype=np.int64).reshape((count,))
+            return (prim_ids >= 0) & (prim_ids < self.triangle_count)
 
         tfar = _result_array(result, "tfar", "t", "distance")
         prim_ids = _result_array(result, "primID", "prim_id", "primitive_id")
