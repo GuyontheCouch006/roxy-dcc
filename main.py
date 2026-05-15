@@ -1,4 +1,4 @@
-USE_TAICHI  = False
+USE_TAICHI  = True
 DEBUG_LEVEL = 0   # 0=off  1=milestone timers  2=timers + cProfile
 
 import random
