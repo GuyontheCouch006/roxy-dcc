@@ -40,6 +40,35 @@ class ImageTexture:
         self._pixels = np.transpose(pixels[:, :, :3], (1, 0, 2))
         return self._pixels
 
+    def load_pixels_u8(self, max_size=None):
+        """Load texture pixels as uint8 HxWx3, optionally downsampling first.
+
+        The CPU renderer samples float textures lazily through _load_pixels().
+        The Taichi renderer needs a compact upload format; using uint8 here avoids
+        expanding large JPEGs to multi-gigabyte float arrays before upload.
+        """
+        if self.path is None:
+            pixels = self._load_pixels()
+            return np.clip(pixels * 255.0 + 0.5, 0, 255).astype(np.uint8)
+
+        try:
+            import pygame
+        except ImportError as exc:
+            raise RuntimeError("pygame is required to load image textures") from exc
+
+        surface = pygame.image.load(self.path)
+        width, height = surface.get_size()
+        if max_size is not None and max(width, height) > max_size:
+            scale = float(max_size) / float(max(width, height))
+            size = (
+                max(1, int(round(width * scale))),
+                max(1, int(round(height * scale))),
+            )
+            surface = pygame.transform.smoothscale(surface, size)
+
+        pixels = pygame.surfarray.array3d(surface)
+        return np.transpose(pixels[:, :, :3], (1, 0, 2)).copy()
+
     def sample(self, uv):
         pixels = self._load_pixels()
         h, w = pixels.shape[:2]

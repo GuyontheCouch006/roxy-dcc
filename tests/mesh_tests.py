@@ -245,6 +245,9 @@ def test_indexed_triangle_arrays_apply_transform_once():
     assert approx_eq(arrays['v1'][1][0], 11.0)
     assert arrays['groups'] == ["near", "far"]
     assert arrays['group_idx'][1] == 1
+    assert arrays['has_uv'][0] == 1
+    assert approx_eq(arrays['uv1'][0][0], 1.0)
+    assert approx_eq(arrays['uv2'][0][1], 1.0)
 
 def test_indexed_triangle_arrays_fallback_normals():
     mesh = IndexedMesh(
@@ -255,6 +258,7 @@ def test_indexed_triangle_arrays_fallback_normals():
     assert approx_eq(arrays['n0'][0][2], 1.0)
     assert approx_eq(arrays['n1'][0][2], 1.0)
     assert approx_eq(arrays['n2'][0][2], 1.0)
+    assert arrays['has_uv'][0] == 0
 
 
 if __name__ == "__main__":

@@ -253,6 +253,8 @@ def scene_intersect(ro, rd):
     closest_idx    = -1
     is_bvh_hit     = 0
     bvh_mat_idx    = 0
+    closest_u      = 0.0
+    closest_v      = 0.0
 
     # ── Primitives — linear scan ─────────────────────────────────────────────
     n = _n_objects[None]
@@ -292,6 +294,8 @@ def scene_intersect(ro, rd):
             closest_idx = tri_idx
             is_bvh_hit  = 1
             bvh_mat_idx = _bvh_mat_idx[tri_idx]
+            closest_u   = u
+            closest_v   = v
             w = 1.0 - u - v
             closest_normal = (
                 _bvh_n0[tri_idx] * w +
@@ -299,4 +303,7 @@ def scene_intersect(ro, rd):
                 _bvh_n2[tri_idx] * v
             ).normalized()
 
-    return closest_t, closest_normal, closest_idx, is_bvh_hit, bvh_mat_idx
+    return (
+        closest_t, closest_normal, closest_idx, is_bvh_hit,
+        bvh_mat_idx, closest_u, closest_v,
+    )

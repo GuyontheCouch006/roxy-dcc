@@ -9,6 +9,8 @@ from rendering.taichi.fields import (
     _light_center, _light_radius, _light_albedo, _light_emission,
     _n_lights, MAX_LIGHTS,
     _bvh_n_nodes, _bvh_n_tris, _mat_n_mats,
+    _tex_pixels, _tex_width, _tex_height, _tex_flip_v, _tex_n,
+    MAX_TEXTURES, MAX_TEXTURE_SIZE,
 )
 
 _ZERO3 = [0.0, 0.0, 0.0]
@@ -48,6 +50,37 @@ def _upload_lights(primitive_slots):
         _light_emission[i] = data['emission']
 
 
+def _upload_textures(textures):
+    _tex_n[None] = len(textures)
+    for i in range(MAX_TEXTURES):
+        _tex_width[i] = 0
+        _tex_height[i] = 0
+        _tex_flip_v[i] = 0
+
+    if not textures:
+        return
+
+    import numpy as np
+
+    pixels = np.zeros(
+        (MAX_TEXTURES, MAX_TEXTURE_SIZE, MAX_TEXTURE_SIZE, 3),
+        dtype=np.uint8,
+    )
+    for i, texture in enumerate(textures):
+        data = texture.load_pixels_u8(max_size=MAX_TEXTURE_SIZE)
+        h, w = data.shape[:2]
+        pixels[i, :h, :w] = data
+        _tex_width[i] = w
+        _tex_height[i] = h
+        _tex_flip_v[i] = 1 if texture.flip_v else 0
+
+        if timing.LEVEL >= 1:
+            label = texture.path or f"texture_{i}"
+            timing.defer_print(f"    texture[{i}] {label} → {w}×{h}")
+
+    _tex_pixels.from_numpy(pixels)
+
+
 @timing.timer("extract scene", tag="taichi")
 def extract_scene(world):
     from scene.mesh import IndexedMesh, Mesh, indexed_triangle_arrays
@@ -57,6 +90,46 @@ def extract_scene(world):
     primitive_slots = []
     mesh_tri_data   = []
     mesh_batches    = []
+    textures         = []
+    texture_indices  = {}
+
+    def _texture_idx(mat):
+        texture = getattr(mat, '_albedo_texture', None)
+        if texture is None:
+            return -1
+
+        key = (
+            texture.path,
+            bool(texture.flip_v),
+            id(texture) if texture.path is None else None,
+        )
+        if key in texture_indices:
+            return texture_indices[key]
+
+        if len(textures) >= MAX_TEXTURES:
+            raise ValueError(
+                f"Scene has more than {MAX_TEXTURES} image textures; "
+                "increase MAX_TEXTURES in rendering/taichi/fields.py"
+            )
+
+        texture_indices[key] = len(textures)
+        textures.append(texture)
+        return texture_indices[key]
+
+    def _material_data(mat):
+        mt = mat.taichi_type_id()
+        params = mat.taichi_params()
+        return {
+            'mat_type': mt,
+            'albedo': list(mat._albedo),
+            'roughness': params[0] if mt in (1, 4) else 0.0,
+            'ior': params[0] if mt == 2 else 1.0,
+            'emission': params[0] if mt == 3 else 0.0,
+            'texture_idx': _texture_idx(mat),
+        }
+
+    def _uv2(uv):
+        return [float(uv[0]), float(uv[1])] if uv is not None else [0.0, 0.0]
 
     def _collect(obj):
         if not obj.renderable:
@@ -88,16 +161,15 @@ def extract_scene(world):
                         from core import Color
                         mat = Diffuse(Color(0.8, 0.8, 0.8))
 
-                    mt     = mat.taichi_type_id()
-                    params = mat.taichi_params()
+                    mat_data = _material_data(mat)
                     mesh_tri_data.append({
                         'v0': v0, 'v1': v1, 'v2': v2,
                         'n0': n0, 'n1': n1, 'n2': n2,
-                        'mat_type':  mt,
-                        'albedo':    list(mat._albedo),
-                        'roughness': params[0] if mt in (1, 4) else 0.0,
-                        'ior':       params[0] if mt == 2 else 1.0,
-                        'emission':  params[0] if mt == 3 else 0.0,
+                        'uv0': _uv2(tri._uv0),
+                        'uv1': _uv2(tri._uv1),
+                        'uv2': _uv2(tri._uv2),
+                        'has_uv': 1 if tri._uv0 is not None and tri._uv1 is not None and tri._uv2 is not None else 0,
+                        **mat_data,
                     })
             elif isinstance(geo, IndexedMesh):
                 arrays = indexed_triangle_arrays(
@@ -114,15 +186,7 @@ def extract_scene(world):
                         from core import Color
                         mat = Diffuse(Color(0.8, 0.8, 0.8))
 
-                    mt     = mat.taichi_type_id()
-                    params = mat.taichi_params()
-                    mat_by_group_idx[group_idx] = {
-                        'mat_type':  mt,
-                        'albedo':    list(mat._albedo),
-                        'roughness': params[0] if mt in (1, 4) else 0.0,
-                        'ior':       params[0] if mt == 2 else 1.0,
-                        'emission':  params[0] if mt == 3 else 0.0,
-                    }
+                    mat_by_group_idx[group_idx] = _material_data(mat)
 
                 mesh_batches.append(TriangleBatch.from_indexed_arrays(arrays, mat_by_group_idx))
             else:
@@ -139,6 +203,8 @@ def extract_scene(world):
 
     for obj in world.objects:
         _collect(obj)
+
+    _upload_textures(textures)
 
     # ── Upload primitives ─────────────────────────────────────────────────────
     n = len(primitive_slots)

@@ -83,22 +83,29 @@ def test_indexed_triangle_batch_keeps_compact_material_palette():
         'n0': [[0, 0, 1], [0, 0, 1], [0, 0, 1]],
         'n1': [[0, 0, 1], [0, 0, 1], [0, 0, 1]],
         'n2': [[0, 0, 1], [0, 0, 1], [0, 0, 1]],
+        'uv0': [[0, 0], [0, 0], [0, 0]],
+        'uv1': [[1, 0], [1, 0], [1, 0]],
+        'uv2': [[0, 1], [0, 1], [0, 1]],
+        'has_uv': [1, 1, 1],
         'group_idx': [0, 1, 0],
     }
     materials = {
-        0: {'mat_type': 0, 'albedo': [1, 0, 0], 'roughness': 0, 'ior': 1, 'emission': 0},
-        1: {'mat_type': 1, 'albedo': [0, 1, 0], 'roughness': 0.25, 'ior': 1, 'emission': 0},
-        2: {'mat_type': 0, 'albedo': [0, 0, 1], 'roughness': 0, 'ior': 1, 'emission': 0},
+        0: {'mat_type': 0, 'albedo': [1, 0, 0], 'roughness': 0, 'ior': 1, 'emission': 0, 'texture_idx': 3},
+        1: {'mat_type': 1, 'albedo': [0, 1, 0], 'roughness': 0.25, 'ior': 1, 'emission': 0, 'texture_idx': -1},
+        2: {'mat_type': 0, 'albedo': [0, 0, 1], 'roughness': 0, 'ior': 1, 'emission': 0, 'texture_idx': -1},
     }
     batch = TriangleBatch.from_indexed_arrays(arrays, materials)
     assert batch.triangle_count == 3
     assert len(batch.mat_palette) == 2
     assert len(batch.mat_type) == 2
     assert list(batch.mat_idx) == [0, 1, 0]
+    assert list(batch.has_uv) == [1, 1, 1]
+    assert batch.mat_palette[0]['texture_idx'] == 3
 
     builder = GPUBVHBuilder().build([batch])
     assert len(builder.mat_palette) == 2
     assert builder._ordered_mat_idx.shape == (3,)
+    assert builder._ordered_uv1.shape == (3, 2)
 
 
 if __name__ == "__main__":

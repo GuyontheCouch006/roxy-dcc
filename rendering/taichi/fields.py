@@ -8,6 +8,8 @@ MAX_BVH_NODES = 4_000_000   # 2× road-bike triangle count
 MAX_TRIANGLES = 2_000_000   # road-bike quads → ~1.68 M triangles
 MAX_MATERIALS = 4_096
 MAX_LIGHTS    = 4_096
+MAX_TEXTURES  = 8
+MAX_TEXTURE_SIZE = 2_048
 
 _pixels = ti.Vector.field(3, dtype=ti.f32, shape=(MAX_H, MAX_W))
 _accumulator = ti.Vector.field(3, dtype=ti.f32, shape=(MAX_H, MAX_W))
@@ -60,6 +62,10 @@ _bvh_v2      = ti.Vector.field(3, dtype=ti.f32, shape=MAX_TRIANGLES)
 _bvh_n0      = ti.Vector.field(3, dtype=ti.f32, shape=MAX_TRIANGLES)
 _bvh_n1      = ti.Vector.field(3, dtype=ti.f32, shape=MAX_TRIANGLES)
 _bvh_n2      = ti.Vector.field(3, dtype=ti.f32, shape=MAX_TRIANGLES)
+_bvh_uv0     = ti.Vector.field(2, dtype=ti.f32, shape=MAX_TRIANGLES)
+_bvh_uv1     = ti.Vector.field(2, dtype=ti.f32, shape=MAX_TRIANGLES)
+_bvh_uv2     = ti.Vector.field(2, dtype=ti.f32, shape=MAX_TRIANGLES)
+_bvh_has_uv  = ti.field(dtype=ti.i32, shape=MAX_TRIANGLES)
 _bvh_mat_idx = ti.field(dtype=ti.i32, shape=MAX_TRIANGLES)
 _bvh_n_tris  = ti.field(dtype=ti.i32, shape=())
 
@@ -69,4 +75,14 @@ _mat_albedo    = ti.Vector.field(3, dtype=ti.f32, shape=MAX_MATERIALS)
 _mat_roughness = ti.field(dtype=ti.f32,           shape=MAX_MATERIALS)
 _mat_ior       = ti.field(dtype=ti.f32,           shape=MAX_MATERIALS)
 _mat_emission  = ti.field(dtype=ti.f32,           shape=MAX_MATERIALS)
+_mat_texture   = ti.field(dtype=ti.i32,           shape=MAX_MATERIALS)
 _mat_n_mats    = ti.field(dtype=ti.i32,           shape=())
+
+# ── Texture cache ───────────────────────────────────────────────────────────
+_tex_pixels = ti.Vector.field(
+    3, dtype=ti.u8, shape=(MAX_TEXTURES, MAX_TEXTURE_SIZE, MAX_TEXTURE_SIZE)
+)
+_tex_width   = ti.field(dtype=ti.i32, shape=MAX_TEXTURES)
+_tex_height  = ti.field(dtype=ti.i32, shape=MAX_TEXTURES)
+_tex_flip_v  = ti.field(dtype=ti.i32, shape=MAX_TEXTURES)
+_tex_n       = ti.field(dtype=ti.i32, shape=())

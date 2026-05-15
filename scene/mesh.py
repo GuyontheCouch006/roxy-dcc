@@ -411,6 +411,8 @@ class IndexedMesh(Shape):
         tri_normals = self._indexed_normal_array()
         tri_normals = self._transform_vectors_array(tri_normals, normal_matrix)
         tri_normals = self._normalize_rows(tri_normals.reshape((-1, 3))).reshape((-1, 3, 3))
+        tri_uvs = self._indexed_uv_array()
+        has_uv = np.all(self._tri_uv_idx >= 0, axis=1).astype(np.int32, copy=False)
 
         return {
             'v0': tri_vertices[:, 0, :].astype(dtype, copy=False),
@@ -419,6 +421,10 @@ class IndexedMesh(Shape):
             'n0': tri_normals[:, 0, :].astype(dtype, copy=False),
             'n1': tri_normals[:, 1, :].astype(dtype, copy=False),
             'n2': tri_normals[:, 2, :].astype(dtype, copy=False),
+            'uv0': tri_uvs[:, 0, :].astype(dtype, copy=False),
+            'uv1': tri_uvs[:, 1, :].astype(dtype, copy=False),
+            'uv2': tri_uvs[:, 2, :].astype(dtype, copy=False),
+            'has_uv': has_uv,
             'group_idx': self._tri_group_idx.astype(np.int32, copy=False),
             'groups': list(self._groups),
         }
@@ -523,6 +529,16 @@ class IndexedMesh(Shape):
         if np.any(valid):
             tri_normals[valid] = self._normals[self._tri_normal_idx[valid]]
         return tri_normals
+
+    def _indexed_uv_array(self):
+        tri_uvs = np.zeros((self.triangle_count, 3, 2), dtype=np.float64)
+        if self._uvs is None:
+            return tri_uvs
+
+        valid = np.all(self._tri_uv_idx >= 0, axis=1)
+        if np.any(valid):
+            tri_uvs[valid] = self._uvs[self._tri_uv_idx[valid]]
+        return tri_uvs
 
     @staticmethod
     def _matrix_array(matrix):

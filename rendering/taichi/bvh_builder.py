@@ -20,6 +20,11 @@ class TriangleBatch:
     roughness: np.ndarray
     ior: np.ndarray
     emission: np.ndarray
+    uv0: np.ndarray = None
+    uv1: np.ndarray = None
+    uv2: np.ndarray = None
+    has_uv: np.ndarray = None
+    texture_idx: np.ndarray = None
     mat_idx: np.ndarray = None
     mat_palette: list = None
 
@@ -35,10 +40,23 @@ class TriangleBatch:
         self.roughness = np.asarray(self.roughness, dtype=np.float32).reshape((-1,))
         self.ior = np.asarray(self.ior, dtype=np.float32).reshape((-1,))
         self.emission = np.asarray(self.emission, dtype=np.float32).reshape((-1,))
+        self.uv0 = self._vec2_array(self.uv0, self.triangle_count)
+        self.uv1 = self._vec2_array(self.uv1, self.triangle_count)
+        self.uv2 = self._vec2_array(self.uv2, self.triangle_count)
+        if self.has_uv is None:
+            self.has_uv = np.zeros(self.triangle_count, dtype=np.int32)
+        else:
+            self.has_uv = np.asarray(self.has_uv, dtype=np.int32).reshape((-1,))
+        texture_count = self.triangle_count if self.mat_idx is None else len(self.mat_type)
+        if self.texture_idx is None:
+            self.texture_idx = np.full(texture_count, -1, dtype=np.int32)
+        else:
+            self.texture_idx = np.asarray(self.texture_idx, dtype=np.int32).reshape((-1,))
 
         tri_lengths = {
             len(self.v0), len(self.v1), len(self.v2),
             len(self.n0), len(self.n1), len(self.n2),
+            len(self.uv0), len(self.uv1), len(self.uv2), len(self.has_uv),
         }
         if len(tri_lengths) != 1:
             raise ValueError("TriangleBatch geometry arrays must all have the same length")
@@ -47,6 +65,7 @@ class TriangleBatch:
             material_lengths = {
                 len(self.mat_type), len(self.albedo),
                 len(self.roughness), len(self.ior), len(self.emission),
+                len(self.texture_idx),
             }
             if len(material_lengths) != 1 or next(iter(material_lengths)) != self.triangle_count:
                 raise ValueError("TriangleBatch per-triangle material arrays must match triangle count")
@@ -57,6 +76,7 @@ class TriangleBatch:
             palette_lengths = {
                 len(self.mat_type), len(self.albedo),
                 len(self.roughness), len(self.ior), len(self.emission),
+                len(self.texture_idx),
             }
             if len(palette_lengths) != 1:
                 raise ValueError("TriangleBatch material palette arrays must all have the same length")
@@ -68,6 +88,7 @@ class TriangleBatch:
                         'roughness': float(self.roughness[i]),
                         'ior': float(self.ior[i]),
                         'emission': float(self.emission[i]),
+                        'texture_idx': int(self.texture_idx[i]),
                     }
                     for i in range(len(self.mat_type))
                 ]
@@ -75,6 +96,12 @@ class TriangleBatch:
     @staticmethod
     def _vec3_array(value):
         return np.asarray(value, dtype=np.float32).reshape((-1, 3))
+
+    @staticmethod
+    def _vec2_array(value, triangle_count):
+        if value is None:
+            return np.zeros((triangle_count, 2), dtype=np.float32)
+        return np.asarray(value, dtype=np.float32).reshape((-1, 2))
 
     @property
     def triangle_count(self):
@@ -94,6 +121,11 @@ class TriangleBatch:
             np.zeros(0, dtype=np.float32),
             np.zeros(0, dtype=np.float32),
             np.zeros(0, dtype=np.float32),
+            uv0=np.zeros((0, 2), dtype=np.float32),
+            uv1=np.zeros((0, 2), dtype=np.float32),
+            uv2=np.zeros((0, 2), dtype=np.float32),
+            has_uv=np.zeros(0, dtype=np.int32),
+            texture_idx=np.zeros(0, dtype=np.int32),
             mat_idx=np.zeros(0, dtype=np.int32),
             mat_palette=[],
         )
@@ -114,6 +146,11 @@ class TriangleBatch:
             [t['roughness'] for t in tris],
             [t['ior'] for t in tris],
             [t['emission'] for t in tris],
+            uv0=[t.get('uv0', [0.0, 0.0]) for t in tris],
+            uv1=[t.get('uv1', [0.0, 0.0]) for t in tris],
+            uv2=[t.get('uv2', [0.0, 0.0]) for t in tris],
+            has_uv=[t.get('has_uv', 0) for t in tris],
+            texture_idx=[t.get('texture_idx', -1) for t in tris],
         )
 
     @classmethod
@@ -131,6 +168,7 @@ class TriangleBatch:
         roughness_by_group = np.zeros(n_groups, dtype=np.float32)
         ior_by_group = np.ones(n_groups, dtype=np.float32)
         emission_by_group = np.zeros(n_groups, dtype=np.float32)
+        texture_by_group = np.full(n_groups, -1, dtype=np.int32)
 
         for local_idx, source_idx in enumerate(used_groups):
             mat = material_by_group_idx[int(source_idx)]
@@ -139,6 +177,7 @@ class TriangleBatch:
             roughness_by_group[local_idx] = mat['roughness']
             ior_by_group[local_idx] = mat['ior']
             emission_by_group[local_idx] = mat['emission']
+            texture_by_group[local_idx] = mat.get('texture_idx', -1)
         palette = [
             {
                 'type': int(mat_type_by_group[i]),
@@ -146,6 +185,7 @@ class TriangleBatch:
                 'roughness': float(roughness_by_group[i]),
                 'ior': float(ior_by_group[i]),
                 'emission': float(emission_by_group[i]),
+                'texture_idx': int(texture_by_group[i]),
             }
             for i in range(n_groups)
         ]
@@ -162,6 +202,11 @@ class TriangleBatch:
             roughness_by_group,
             ior_by_group,
             emission_by_group,
+            uv0=arrays.get('uv0'),
+            uv1=arrays.get('uv1'),
+            uv2=arrays.get('uv2'),
+            has_uv=arrays.get('has_uv'),
+            texture_idx=texture_by_group,
             mat_idx=local_group_idx,
             mat_palette=palette,
         )
@@ -185,6 +230,8 @@ class TriangleBatch:
             roughness = np.asarray([m['roughness'] for m in palette], dtype=np.float32)
             ior = np.asarray([m['ior'] for m in palette], dtype=np.float32)
             emission = np.asarray([m['emission'] for m in palette], dtype=np.float32)
+            texture_idx = np.asarray(
+                [m.get('texture_idx', -1) for m in palette], dtype=np.int32)
             return cls(
                 np.concatenate([b.v0 for b in batches]),
                 np.concatenate([b.v1 for b in batches]),
@@ -197,6 +244,11 @@ class TriangleBatch:
                 roughness,
                 ior,
                 emission,
+                uv0=np.concatenate([b.uv0 for b in batches]),
+                uv1=np.concatenate([b.uv1 for b in batches]),
+                uv2=np.concatenate([b.uv2 for b in batches]),
+                has_uv=np.concatenate([b.has_uv for b in batches]),
+                texture_idx=texture_idx,
                 mat_idx=np.concatenate(mat_idx),
                 mat_palette=palette,
             )
@@ -212,6 +264,11 @@ class TriangleBatch:
             np.concatenate([b.roughness for b in batches]),
             np.concatenate([b.ior for b in batches]),
             np.concatenate([b.emission for b in batches]),
+            uv0=np.concatenate([b.uv0 for b in batches]),
+            uv1=np.concatenate([b.uv1 for b in batches]),
+            uv2=np.concatenate([b.uv2 for b in batches]),
+            has_uv=np.concatenate([b.has_uv for b in batches]),
+            texture_idx=np.concatenate([b.texture_idx for b in batches]),
         )
 
 
@@ -245,6 +302,10 @@ class GPUBVHBuilder:
         self._ordered_n0 = np.zeros((0, 3), dtype=np.float32)
         self._ordered_n1 = np.zeros((0, 3), dtype=np.float32)
         self._ordered_n2 = np.zeros((0, 3), dtype=np.float32)
+        self._ordered_uv0 = np.zeros((0, 2), dtype=np.float32)
+        self._ordered_uv1 = np.zeros((0, 2), dtype=np.float32)
+        self._ordered_uv2 = np.zeros((0, 2), dtype=np.float32)
+        self._ordered_has_uv = np.zeros(0, dtype=np.int32)
         self._ordered_mat_idx = np.zeros(0, dtype=np.int32)
 
     @property
@@ -321,17 +382,20 @@ class GPUBVHBuilder:
                 'roughness': float(batch.roughness[i]),
                 'ior': float(batch.ior[i]),
                 'emission': float(batch.emission[i]),
+                'texture_idx': int(batch.texture_idx[i]),
             })
         return mat_idx
 
     def _get_or_add_material(self, mat):
         mat_type = mat.get('mat_type', mat.get('type'))
+        texture_idx = int(mat.get('texture_idx', -1))
         key = (
             int(mat_type),
             tuple(float(v) for v in mat['albedo']),
             float(mat['roughness']),
             float(mat['ior']),
             float(mat['emission']),
+            texture_idx,
         )
         if key not in self._mat_key_to_idx:
             self._mat_key_to_idx[key] = len(self.mat_palette)
@@ -341,6 +405,7 @@ class GPUBVHBuilder:
                 'roughness': key[2],
                 'ior': key[3],
                 'emission': key[4],
+                'texture_idx': key[5],
             })
         return self._mat_key_to_idx[key]
 
@@ -472,6 +537,10 @@ class GPUBVHBuilder:
         self._ordered_n0 = self._batch.n0[order]
         self._ordered_n1 = self._batch.n1[order]
         self._ordered_n2 = self._batch.n2[order]
+        self._ordered_uv0 = self._batch.uv0[order]
+        self._ordered_uv1 = self._batch.uv1[order]
+        self._ordered_uv2 = self._batch.uv2[order]
+        self._ordered_has_uv = self._batch.has_uv[order]
         self._ordered_mat_idx = self._source_mat_idx[order]
 
     def _compute_bounds(self, tri_indices):
@@ -496,9 +565,10 @@ class GPUBVHBuilder:
             _bvh_tri_start, _bvh_tri_count, _bvh_n_nodes,
             _bvh_v0, _bvh_v1, _bvh_v2,
             _bvh_n0, _bvh_n1, _bvh_n2,
+            _bvh_uv0, _bvh_uv1, _bvh_uv2, _bvh_has_uv,
             _bvh_mat_idx, _bvh_n_tris,
             _mat_type, _mat_albedo, _mat_roughness,
-            _mat_ior, _mat_emission, _mat_n_mats,
+            _mat_ior, _mat_emission, _mat_texture, _mat_n_mats,
             MAX_BVH_NODES, MAX_TRIANGLES, MAX_MATERIALS,
         )
 
@@ -541,6 +611,10 @@ class GPUBVHBuilder:
         n0      = np.zeros((MAX_TRIANGLES, 3), dtype=np.float32)
         n1      = np.zeros((MAX_TRIANGLES, 3), dtype=np.float32)
         n2      = np.zeros((MAX_TRIANGLES, 3), dtype=np.float32)
+        uv0     = np.zeros((MAX_TRIANGLES, 2), dtype=np.float32)
+        uv1     = np.zeros((MAX_TRIANGLES, 2), dtype=np.float32)
+        uv2     = np.zeros((MAX_TRIANGLES, 2), dtype=np.float32)
+        has_uv  = np.zeros(MAX_TRIANGLES, dtype=np.int32)
         mat_idx = np.zeros(MAX_TRIANGLES, dtype=np.int32)
         v0[:n_tris] = self._ordered_v0
         v1[:n_tris] = self._ordered_v1
@@ -548,6 +622,10 @@ class GPUBVHBuilder:
         n0[:n_tris] = self._ordered_n0
         n1[:n_tris] = self._ordered_n1
         n2[:n_tris] = self._ordered_n2
+        uv0[:n_tris] = self._ordered_uv0
+        uv1[:n_tris] = self._ordered_uv1
+        uv2[:n_tris] = self._ordered_uv2
+        has_uv[:n_tris] = self._ordered_has_uv
         mat_idx[:n_tris] = self._ordered_mat_idx
         _bvh_v0.from_numpy(v0)
         _bvh_v1.from_numpy(v1)
@@ -555,6 +633,10 @@ class GPUBVHBuilder:
         _bvh_n0.from_numpy(n0)
         _bvh_n1.from_numpy(n1)
         _bvh_n2.from_numpy(n2)
+        _bvh_uv0.from_numpy(uv0)
+        _bvh_uv1.from_numpy(uv1)
+        _bvh_uv2.from_numpy(uv2)
+        _bvh_has_uv.from_numpy(has_uv)
         _bvh_mat_idx.from_numpy(mat_idx)
         _bvh_n_tris[None] = n_tris
 
@@ -565,6 +647,7 @@ class GPUBVHBuilder:
             _mat_roughness[i] = mat['roughness']
             _mat_ior[i]       = mat['ior']
             _mat_emission[i]  = mat['emission']
+            _mat_texture[i]   = mat.get('texture_idx', -1)
         _mat_n_mats[None] = n_mats
 
         if timing.LEVEL >= 1:

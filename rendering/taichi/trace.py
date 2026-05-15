@@ -7,6 +7,9 @@ from rendering.taichi.fields import (
     _accumulator, _normal_accumulator, _albedo_accumulator, _depth_accumulator,
     _frame_count, _ray_count,
     _mat_type, _mat_albedo, _mat_roughness, _mat_ior, _mat_emission,
+    _mat_texture,
+    _bvh_uv0, _bvh_uv1, _bvh_uv2, _bvh_has_uv,
+    _tex_pixels, _tex_width, _tex_height, _tex_flip_v,
     _light_center, _light_radius, _light_albedo, _light_emission, _n_lights,
 )
 from rendering.taichi.sky import sky_color
@@ -90,6 +93,49 @@ def direct_light_sample(hit_p, normal, albedo, direct_light_mode):
 
 
 @ti.func
+def _sample_texture(tex_idx, uv):
+    result = ti.Vector([1.0, 1.0, 1.0])
+    width = _tex_width[tex_idx]
+    height = _tex_height[tex_idx]
+
+    if width > 0 and height > 0:
+        u = uv[0] - ti.floor(uv[0])
+        v = uv[1] - ti.floor(uv[1])
+        if _tex_flip_v[tex_idx] != 0:
+            v = 1.0 - v
+
+        x = u * ti.cast(width - 1, ti.f32)
+        y = v * ti.cast(height - 1, ti.f32)
+        x0 = ti.cast(ti.floor(x), ti.i32)
+        y0 = ti.cast(ti.floor(y), ti.i32)
+        x1 = ti.min(x0 + 1, width - 1)
+        y1 = ti.min(y0 + 1, height - 1)
+        tx = x - ti.cast(x0, ti.f32)
+        ty = y - ti.cast(y0, ti.f32)
+
+        c00 = _tex_pixels[tex_idx, y0, x0].cast(ti.f32) / 255.0
+        c10 = _tex_pixels[tex_idx, y0, x1].cast(ti.f32) / 255.0
+        c01 = _tex_pixels[tex_idx, y1, x0].cast(ti.f32) / 255.0
+        c11 = _tex_pixels[tex_idx, y1, x1].cast(ti.f32) / 255.0
+        c0 = c00 * (1.0 - tx) + c10 * tx
+        c1 = c01 * (1.0 - tx) + c11 * tx
+        result = c0 * (1.0 - ty) + c1 * ty
+
+    return result
+
+
+@ti.func
+def _bvh_albedo(tri_idx, mat_idx, bary_u, bary_v, base_albedo):
+    albedo = base_albedo
+    tex_idx = _mat_texture[mat_idx]
+    if tex_idx >= 0 and _bvh_has_uv[tri_idx] != 0:
+        w = 1.0 - bary_u - bary_v
+        uv = _bvh_uv0[tri_idx] * w + _bvh_uv1[tri_idx] * bary_u + _bvh_uv2[tri_idx] * bary_v
+        albedo = base_albedo * _sample_texture(tex_idx, uv)
+    return albedo
+
+
+@ti.func
 def trace(ro, rd, max_depth, use_sky, bg_color,
           direct_light_mode, direct_light_max_depth):
     color       = ti.Vector([0.0, 0.0, 0.0])
@@ -101,7 +147,7 @@ def trace(ro, rd, max_depth, use_sky, bg_color,
 
     for depth in range(max_depth):
         ti.atomic_add(_ray_count[None], 1)
-        t, normal, idx, is_bvh, bvh_mat = scene_intersect(ro, rd)
+        t, normal, idx, is_bvh, bvh_mat, bary_u, bary_v = scene_intersect(ro, rd)
 
         if t < 0.0 or t >= 1e9:
             if use_sky:
@@ -129,6 +175,7 @@ def trace(ro, rd, max_depth, use_sky, bg_color,
             roughness = _mat_roughness[bvh_mat]
             ior       = _mat_ior[bvh_mat]
             emission  = _mat_emission[bvh_mat]
+            albedo    = _bvh_albedo(idx, bvh_mat, bary_u, bary_v, albedo)
         else:
             mat_type  = _obj_mat_type[idx]
             albedo    = _obj_albedo[idx]
