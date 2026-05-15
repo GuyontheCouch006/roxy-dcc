@@ -30,6 +30,8 @@ class _FakeEmbreeScene:
 
     def run(self, origins, directions, query="INTERSECT", output=True, dists=None):
         if query == "OCCLUDED":
+            if not output:
+                return np.asarray([0, -1], dtype=np.int32)
             return {
                 "primID": np.asarray([0, -1], dtype=np.int32),
                 "tfar": np.asarray([2.0, np.inf], dtype=np.float32),
