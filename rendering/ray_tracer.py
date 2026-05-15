@@ -6,11 +6,13 @@ from multiprocessing import Pool
 import numpy as np
 from core import Color, Point3, Ray
 from rendering.denoise import edge_aware_denoise, linear_to_display
+from rendering.intersector import WorldIntersector
 from rendering.render_stats import RenderStats
 from rendering.sampling import clamp_color_sample, pixel_sample_offset
 
 _worker_world  = None
 _worker_camera = None
+_worker_intersector = None
 _worker_lights = None
 _worker_direct_light_mode = None
 _worker_direct_light_max_depth = None
@@ -40,13 +42,14 @@ _SHADOW_EPSILON = 1e-4
 _PDF_EPSILON = 1e-12
 
 
-def _init_worker(world, camera, lights, direct_light_mode,
+def _init_worker(world, camera, intersector, lights, direct_light_mode,
                  direct_light_max_depth, sample_clamp):
-    global _worker_world, _worker_camera, _worker_lights
+    global _worker_world, _worker_camera, _worker_intersector, _worker_lights
     global _worker_direct_light_mode, _worker_direct_light_max_depth
     global _worker_sample_clamp
     _worker_world  = world
     _worker_camera = camera
+    _worker_intersector = intersector
     _worker_lights = lights
     _worker_direct_light_mode = direct_light_mode
     _worker_direct_light_max_depth = direct_light_max_depth
@@ -149,7 +152,7 @@ def _sample_sphere_light_surface(hit_point, light):
     )
 
 
-def _direct_light_sample_one(hit, world, light, albedo, sample_weight):
+def _direct_light_sample_one(hit, intersector, light, albedo, sample_weight):
     sample = _sample_sphere_light_surface(hit.point, light)
     if sample is None:
         return Color(0, 0, 0), 0
@@ -166,7 +169,7 @@ def _direct_light_sample_one(hit, world, light, albedo, sample_weight):
         return Color(0, 0, 0), 0
 
     shadow_ray = Ray(shadow_origin, to_sample)
-    if world.occluded(shadow_ray, max_t):
+    if intersector.occluded(shadow_ray, max_t):
         return Color(0, 0, 0), 1
 
     light_pdf = sample.area_pdf
@@ -183,7 +186,7 @@ def _direct_light_sample_one(hit, world, light, albedo, sample_weight):
     return contribution, 1
 
 
-def _direct_light_sample(hit, world, lights, albedo, direct_light_mode):
+def _direct_light_sample(hit, intersector, lights, albedo, direct_light_mode):
     if not lights:
         return Color(0, 0, 0), 0
 
@@ -191,12 +194,14 @@ def _direct_light_sample(hit, world, lights, albedo, direct_light_mode):
         direct = Color(0, 0, 0)
         rays_cast = 0
         for light in lights:
-            contribution, shadow_rays = _direct_light_sample_one(hit, world, light, albedo, 1.0)
+            contribution, shadow_rays = _direct_light_sample_one(
+                hit, intersector, light, albedo, 1.0)
             direct += contribution
             rays_cast += shadow_rays
         return direct, rays_cast
 
-    return _direct_light_sample_one(hit, world, random.choice(lights), albedo, len(lights))
+    return _direct_light_sample_one(
+        hit, intersector, random.choice(lights), albedo, len(lights))
 
 
 def _guide_tuple(color, rays_cast, collect_guides,
@@ -208,13 +213,14 @@ def _guide_tuple(color, rays_cast, collect_guides,
     return color, rays_cast
 
 
-def _trace(ray, world, max_depth, lights=None, direct_light_mode="one", depth=0,
-           collect_guides=False, direct_light_max_depth=1):
+def _trace(ray, world, intersector, max_depth, lights=None,
+           direct_light_mode="one", depth=0, collect_guides=False,
+           direct_light_max_depth=1):
     if depth >= max_depth:
         return _guide_tuple(Color(0, 0, 0), 0, collect_guides)
 
     rays_cast = 1
-    hit = world.intersect(ray)
+    hit = intersector.intersect(ray)
     if hit is None:
         return _guide_tuple(world.sky_color(ray), rays_cast, collect_guides)
 
@@ -230,11 +236,13 @@ def _trace(ray, world, max_depth, lights=None, direct_light_mode="one", depth=0,
     scattered, attenuation = result
     direct = Color(0, 0, 0)
     if mat.taichi_type_id() == 0 and depth < direct_light_max_depth:
-        direct, shadow_rays = _direct_light_sample(hit, world, lights or [], attenuation, direct_light_mode)
+        direct, shadow_rays = _direct_light_sample(
+            hit, intersector, lights or [], attenuation, direct_light_mode)
         rays_cast += shadow_rays
     elif mat.taichi_type_id() == 4 and depth < direct_light_max_depth:
         roughness = mat.taichi_params()[0]
-        direct, shadow_rays = _direct_light_sample(hit, world, lights or [], attenuation, direct_light_mode)
+        direct, shadow_rays = _direct_light_sample(
+            hit, intersector, lights or [], attenuation, direct_light_mode)
         direct *= roughness
         rays_cast += shadow_rays
 
@@ -248,7 +256,8 @@ def _trace(ray, world, max_depth, lights=None, direct_light_mode="one", depth=0,
         attenuation = attenuation / survival
 
     bounced, bounce_rays = _trace(
-        scattered, world, max_depth, lights, direct_light_mode, depth + 1,
+        scattered, world, intersector, max_depth, lights,
+        direct_light_mode, depth + 1,
         direct_light_max_depth=direct_light_max_depth,
     )
     color = emission + direct + attenuation * bounced
@@ -273,7 +282,7 @@ def _trace_band_worker(args):
                 jitter=pixel_sample_offset(x, y, frame),
             )
             c, ray_count, normal, albedo, depth_value = _trace(
-                ray, _worker_world, max_depth, _worker_lights,
+                ray, _worker_world, _worker_intersector, max_depth, _worker_lights,
                 _worker_direct_light_mode, collect_guides=True,
                 direct_light_max_depth=_worker_direct_light_max_depth)
             c = clamp_color_sample(c, _worker_sample_clamp)
@@ -292,11 +301,12 @@ class RayTracer:
                  sample_clamp=10.0, adaptive_sampling=False,
                  adaptive_min_samples=4, adaptive_threshold=0.002,
                  adaptive_check_interval=1, direct_light_max_depth=1,
-                 startup_progress=None):
+                 startup_progress=None, intersector=None):
         self._world     = world
         self._image     = image
         self._viewport  = viewport
         self._camera    = world.active_camera
+        self._intersector = intersector or WorldIntersector(world)
         self._samples   = samples
         self._max_depth = max_depth
         self._threaded  = threaded
@@ -363,7 +373,8 @@ class RayTracer:
                         jitter=pixel_sample_offset(x, y, frame),
                     )
                     c, ray_count, normal, albedo, depth_value = _trace(
-                        ray, self._world, self._max_depth, self._lights,
+                        ray, self._world, self._intersector,
+                        self._max_depth, self._lights,
                         self._direct_light_mode, collect_guides=True,
                         direct_light_max_depth=self._direct_light_max_depth)
                     c = clamp_color_sample(c, self._sample_clamp)
@@ -444,7 +455,7 @@ class RayTracer:
             processes=10,
             initializer=_init_worker,
             initargs=(
-                self._world, self._camera, self._lights,
+                self._world, self._camera, self._intersector, self._lights,
                 self._direct_light_mode, self._direct_light_max_depth,
                 self._sample_clamp,
             ),
