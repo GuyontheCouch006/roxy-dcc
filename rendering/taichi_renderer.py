@@ -59,7 +59,7 @@ class TaichiRenderer:
                    cam_pos, cam_fwd, cam_right, cam_up):
         render_kernel(W, H, fov_tan, aspect, self._max_depth, use_sky,
                       self._direct_light_mode_id, self._direct_light_max_depth,
-                      self._sample_clamp, bg_color,
+                      self._sample_clamp, int(timing.LEVEL >= 1), bg_color,
                       cam_pos, cam_fwd, cam_right, cam_up)
 
     @timing.timer("denoise", tag="render")
@@ -107,9 +107,11 @@ class TaichiRenderer:
         args = (W, H, fov_tan, aspect, use_sky, bg_color,
                 cam_pos, cam_fwd, cam_right, cam_up)
 
-        _ray_count[None] = 0
+        if timing.LEVEL >= 1:
+            _ray_count[None] = 0
         self._jit_frame(*args)
-        total_rays_cast += int(_ray_count[None])
+        if timing.LEVEL >= 1:
+            total_rays_cast += int(_ray_count[None])
         _frame_count[None] = 1
         self._copy_display_pixels(W, H)
         if self._viewport:
@@ -123,12 +125,15 @@ class TaichiRenderer:
         for frame in range(1, target_samples):
             if self._viewport and self._viewport.should_close:
                 break
-            _ray_count[None] = 0
+            count_rays = int(timing.LEVEL >= 1)
+            if count_rays:
+                _ray_count[None] = 0
             render_kernel(W, H, fov_tan, aspect, self._max_depth, use_sky,
                           self._direct_light_mode_id, self._direct_light_max_depth,
-                          self._sample_clamp, bg_color,
+                          self._sample_clamp, count_rays, bg_color,
                           cam_pos, cam_fwd, cam_right, cam_up)
-            total_rays_cast += int(_ray_count[None])
+            if count_rays:
+                total_rays_cast += int(_ray_count[None])
             _frame_count[None] = frame + 1
             frames_rendered = frame + 1
 
