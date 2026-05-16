@@ -86,3 +86,28 @@ _tex_width   = ti.field(dtype=ti.i32, shape=MAX_TEXTURES)
 _tex_height  = ti.field(dtype=ti.i32, shape=MAX_TEXTURES)
 _tex_flip_v  = ti.field(dtype=ti.i32, shape=MAX_TEXTURES)
 _tex_n       = ti.field(dtype=ti.i32, shape=())
+
+# ── Wavefront path-tracing queues ───────────────────────────────────────────
+MAX_RAYS = MAX_W * MAX_H   # 2,073,600 at 1920×1080
+
+# Per-ray state (updated each bounce)
+_wf_ro         = ti.Vector.field(3, dtype=ti.f32, shape=MAX_RAYS)
+_wf_rd         = ti.Vector.field(3, dtype=ti.f32, shape=MAX_RAYS)
+_wf_throughput = ti.Vector.field(3, dtype=ti.f32, shape=MAX_RAYS)
+_wf_ior        = ti.field(dtype=ti.f32,           shape=MAX_RAYS)
+_wf_active     = ti.field(dtype=ti.i32,           shape=MAX_RAYS)
+_wf_color      = ti.Vector.field(3, dtype=ti.f32, shape=MAX_RAYS)
+
+# First-hit data for denoising accumulators (written once per sample)
+_wf_first_normal = ti.Vector.field(3, dtype=ti.f32, shape=MAX_RAYS)
+_wf_first_albedo = ti.Vector.field(3, dtype=ti.f32, shape=MAX_RAYS)
+_wf_first_depth  = ti.field(dtype=ti.f32,           shape=MAX_RAYS)
+
+# Hit results written by wf_traverse, consumed by wf_shade
+_wf_hit_t      = ti.field(dtype=ti.f32, shape=MAX_RAYS)
+_wf_hit_u      = ti.field(dtype=ti.f32, shape=MAX_RAYS)
+_wf_hit_v      = ti.field(dtype=ti.f32, shape=MAX_RAYS)
+_wf_hit_tri    = ti.field(dtype=ti.i32, shape=MAX_RAYS)
+_wf_hit_is_bvh = ti.field(dtype=ti.i32, shape=MAX_RAYS)
+_wf_hit_bvh_mat= ti.field(dtype=ti.i32, shape=MAX_RAYS)
+_wf_hit_normal = ti.Vector.field(3, dtype=ti.f32, shape=MAX_RAYS)
