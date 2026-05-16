@@ -279,10 +279,14 @@ class GPUBVHBuilder:
     Materials are deduplicated into a shared palette.
     """
 
-    MAX_LEAF_SIZE = 8
-    MAX_DEPTH     = 32
-    BUILD_METHOD  = "morton"
-    MORTON_BITS   = 10
+    MAX_LEAF_SIZE    = 8
+    MAX_DEPTH        = 64
+    BUILD_METHOD     = "sah"
+    MORTON_BITS      = 10
+    SAH_N_BINS       = 16
+    SAH_CT           = 1.0   # traversal cost relative to intersection
+    SAH_CI           = 4.0   # intersection cost
+    SAH_HYBRID_LIMIT = 128   # nodes smaller than this use fast median split
 
     def __init__(self):
         self.nodes           = []
@@ -321,7 +325,10 @@ class GPUBVHBuilder:
 
         if batch.triangle_count:
             method = method or self.BUILD_METHOD
-            if method == "morton":
+            if method == "sah":
+                all_indices = np.arange(batch.triangle_count, dtype=np.int32)
+                self._build_sah_node(all_indices, depth=0)
+            elif method == "morton":
                 self._build_morton_bvh()
             elif method == "median":
                 all_indices = np.arange(batch.triangle_count, dtype=np.int32)
@@ -522,6 +529,161 @@ class GPUBVHBuilder:
                 'tri_count': 0,
             }
 
+        return node_idx
+
+    @staticmethod
+    def _sa_batch(aabb_min, aabb_max):
+        """Surface area for a batch of AABBs. aabb_min/max: (N, 3) → (N,)."""
+        d = np.maximum(aabb_max - aabb_min, 0.0)
+        return 2.0 * (d[:, 0]*d[:, 1] + d[:, 1]*d[:, 2] + d[:, 2]*d[:, 0])
+
+    @staticmethod
+    def _sa_single(aabb_min, aabb_max):
+        d = np.maximum(
+            np.asarray(aabb_max, dtype=np.float32) - np.asarray(aabb_min, dtype=np.float32),
+            0.0,
+        )
+        return float(2.0 * (d[0]*d[1] + d[1]*d[2] + d[2]*d[0]))
+
+    def _build_sah_node(self, tri_indices, depth):
+        n = len(tri_indices)
+
+        # Small nodes: median split is nearly as good and builds much faster.
+        # Do this BEFORE appending the placeholder so no dangling empty node is left.
+        if n <= self.SAH_HYBRID_LIMIT:
+            return self._build_median_node(tri_indices, depth)
+
+        node_idx = len(self.nodes)
+        self.nodes.append({})
+
+        # Compute local copies once — reused for both bounds and SAH binning.
+        tri_bmin = self._tri_bounds_min[tri_indices]
+        tri_bmax = self._tri_bounds_max[tri_indices]
+        aabb_min = tri_bmin.min(axis=0).tolist()
+        aabb_max = tri_bmax.max(axis=0).tolist()
+
+        if n <= self.MAX_LEAF_SIZE or depth >= self.MAX_DEPTH:
+            tri_start = self._ordered_count
+            self._ordered_index_chunks.append(tri_indices)
+            self._ordered_count += n
+            self.nodes[node_idx] = {
+                'aabb_min': aabb_min, 'aabb_max': aabb_max,
+                'left': -1, 'right': -1,
+                'tri_start': tri_start, 'tri_count': n,
+            }
+            return node_idx
+
+        parent_sa = self._sa_single(aabb_min, aabb_max)
+        leaf_cost = self.SAH_CI * n
+        centroids = self._centroids[tri_indices]
+
+        best_cost = float('inf')
+        best_axis = -1
+        best_split_bin = -1
+        K = self.SAH_N_BINS
+
+        for axis in range(3):
+            c_min = float(centroids[:, axis].min())
+            c_max = float(centroids[:, axis].max())
+            if c_max - c_min < 1e-8:
+                continue
+
+            bin_ids = np.clip(
+                ((centroids[:, axis] - c_min) * (K / (c_max - c_min))).astype(np.int32),
+                0, K - 1,
+            )
+
+            bin_count = np.bincount(bin_ids, minlength=K).astype(np.int32)
+
+            # quicksort + reduceat: faster than np.ufunc.at for contiguous scatter-min/max
+            order = np.argsort(bin_ids)
+            sorted_bins = bin_ids[order]
+            edges = np.searchsorted(sorted_bins, np.arange(K + 1))
+            occ = edges[:-1] < edges[1:]
+            occ_starts = edges[:-1][occ]
+            n_occ = int(occ.sum())
+
+            bin_min = np.full((K, 3), np.inf,  dtype=np.float32)
+            bin_max = np.full((K, 3), -np.inf, dtype=np.float32)
+            if n_occ:
+                s_bmin = tri_bmin[order]
+                s_bmax = tri_bmax[order]
+                bin_min[occ] = np.minimum.reduceat(s_bmin, occ_starts)[:n_occ]
+                bin_max[occ] = np.maximum.reduceat(s_bmax, occ_starts)[:n_occ]
+
+            # Mask empty bins to neutral values before prefix sweeps
+            has_tris = bin_count > 0
+            bin_min_masked = np.where(has_tris[:, None], bin_min,  np.inf)
+            bin_max_masked = np.where(has_tris[:, None], bin_max, -np.inf)
+
+            # Fully vectorised left/right prefix sweeps (no Python loops over K)
+            l_min = np.minimum.accumulate(bin_min_masked,        axis=0)[:-1]   # (K-1, 3)
+            l_max = np.maximum.accumulate(bin_max_masked,        axis=0)[:-1]
+            l_cnt = np.cumsum(bin_count)[:-1]                                   # (K-1,)
+
+            r_min = np.minimum.accumulate(bin_min_masked[::-1],  axis=0)[::-1][1:]
+            r_max = np.maximum.accumulate(bin_max_masked[::-1],  axis=0)[::-1][1:]
+            r_cnt = np.cumsum(bin_count[::-1])[::-1][1:]
+
+            valid = (l_cnt > 0) & (r_cnt > 0)
+            if not valid.any():
+                continue
+
+            l_sa = self._sa_batch(l_min, l_max)   # (K-1,)
+            r_sa = self._sa_batch(r_min, r_max)
+
+            if parent_sa < 1e-12:
+                continue
+
+            costs = np.where(
+                valid,
+                self.SAH_CT + self.SAH_CI * (l_sa * l_cnt + r_sa * r_cnt) / parent_sa,
+                np.inf,
+            )
+            idx = int(np.argmin(costs))
+            if costs[idx] < best_cost:
+                best_cost = float(costs[idx])
+                best_axis = axis
+                best_split_bin = idx
+
+        # Fall back to leaf if SAH says it's not worth splitting
+        if best_axis < 0 or best_cost >= leaf_cost:
+            tri_start = self._ordered_count
+            self._ordered_index_chunks.append(tri_indices)
+            self._ordered_count += n
+            self.nodes[node_idx] = {
+                'aabb_min': aabb_min, 'aabb_max': aabb_max,
+                'left': -1, 'right': -1,
+                'tri_start': tri_start, 'tri_count': n,
+            }
+            return node_idx
+
+        # Partition along best axis / bin
+        c_min = float(centroids[:, best_axis].min())
+        c_max = float(centroids[:, best_axis].max())
+        bin_ids = np.clip(
+            ((centroids[:, best_axis] - c_min) * (K / (c_max - c_min + 1e-12))).astype(np.int32),
+            0, K - 1,
+        )
+        left_mask = bin_ids <= best_split_bin
+        left_indices = tri_indices[left_mask]
+        right_indices = tri_indices[~left_mask]
+
+        # Degenerate guard: fall back to median if partition is empty
+        if len(left_indices) == 0 or len(right_indices) == 0:
+            mid = n // 2
+            order = np.argpartition(centroids[:, best_axis], mid)
+            left_indices = tri_indices[order[:mid]]
+            right_indices = tri_indices[order[mid:]]
+
+        left_idx  = self._build_sah_node(left_indices,  depth + 1)
+        right_idx = self._build_sah_node(right_indices, depth + 1)
+        aabb_min, aabb_max = self._combine_node_bounds(left_idx, right_idx)
+        self.nodes[node_idx] = {
+            'aabb_min': aabb_min, 'aabb_max': aabb_max,
+            'left': left_idx, 'right': right_idx,
+            'tri_start': -1, 'tri_count': 0,
+        }
         return node_idx
 
     def _finish_ordered_arrays(self):
