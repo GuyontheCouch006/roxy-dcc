@@ -1,0 +1,209 @@
+import taichi as ti
+
+from rendering.taichi.fields import (
+    _pixels, _accumulator,
+    _normal_accumulator, _albedo_accumulator, _depth_accumulator,
+    _obj_albedo, _obj_mat_type, _obj_roughness, _obj_ior, _obj_emission,
+    _mat_type, _mat_albedo, _mat_roughness, _mat_ior, _mat_emission,
+    _wf_ro, _wf_rd, _wf_throughput, _wf_ior, _wf_active, _wf_color,
+    _wf_first_normal, _wf_first_albedo, _wf_first_depth,
+    _wf_hit_t, _wf_hit_u, _wf_hit_v,
+    _wf_hit_tri, _wf_hit_is_bvh, _wf_hit_bvh_mat, _wf_hit_normal,
+)
+from rendering.taichi.camera import get_ray_direction
+from rendering.taichi.intersect import scene_intersect
+from rendering.taichi.trace import direct_light_sample, _bvh_albedo
+from rendering.taichi.scatter import diffuse_scatter, metal_scatter, dielectric_scatter, glossy_scatter
+from rendering.taichi.sky import sky_color
+
+
+@ti.kernel
+def wf_generate(
+    W: int, H: int, frame: int,
+    fov_tan: float, aspect: float,
+    cam_pos:   ti.types.vector(3, ti.f32),
+    cam_fwd:   ti.types.vector(3, ti.f32),
+    cam_right: ti.types.vector(3, ti.f32),
+    cam_up:    ti.types.vector(3, ti.f32),
+):
+    for y, x in ti.ndrange(H, W):
+        i = y * W + x
+        rd = get_ray_direction(x, y, W, H, frame, fov_tan, aspect,
+                               cam_fwd, cam_right, cam_up)
+        _wf_ro[i]           = cam_pos
+        _wf_rd[i]           = rd
+        _wf_throughput[i]   = ti.Vector([1.0, 1.0, 1.0])
+        _wf_ior[i]          = 1.0
+        _wf_active[i]       = 1
+        _wf_color[i]        = ti.Vector([0.0, 0.0, 0.0])
+        _wf_first_normal[i] = ti.Vector([0.0, 0.0, 0.0])
+        _wf_first_albedo[i] = ti.Vector([0.0, 0.0, 0.0])
+        _wf_first_depth[i]  = 0.0
+
+
+@ti.kernel
+def wf_traverse(W: int, H: int):
+    for y, x in ti.ndrange(H, W):
+        i = y * W + x
+        if _wf_active[i]:
+            t, normal, idx, is_bvh, bvh_mat, u, v = scene_intersect(
+                _wf_ro[i], _wf_rd[i])
+            _wf_hit_t[i]       = t
+            _wf_hit_normal[i]  = normal
+            _wf_hit_tri[i]     = idx
+            _wf_hit_is_bvh[i]  = is_bvh
+            _wf_hit_bvh_mat[i] = bvh_mat
+            _wf_hit_u[i]       = u
+            _wf_hit_v[i]       = v
+
+
+@ti.kernel
+def wf_shade(
+    W: int, H: int,
+    depth_idx: int,
+    use_sky: int,
+    bg_color: ti.types.vector(3, ti.f32),
+    direct_light_mode: int,
+    direct_light_max_depth: int,
+    max_depth: int,
+):
+    for y, x in ti.ndrange(H, W):
+        i = y * W + x
+        if _wf_active[i] == 0:
+            continue
+
+        t      = _wf_hit_t[i]
+        rd     = _wf_rd[i]
+        normal = _wf_hit_normal[i]
+
+        front_face = normal.dot(rd) < 0.0
+        if not front_face:
+            normal = -normal
+
+        if t < 0.0 or t >= 1e9:
+            if use_sky:
+                _wf_color[i] += _wf_throughput[i] * sky_color(rd)
+            else:
+                _wf_color[i] += _wf_throughput[i] * bg_color
+            _wf_active[i] = 0
+            continue
+
+        ro    = _wf_ro[i]
+        hit_p = ro + rd * t
+
+        idx     = _wf_hit_tri[i]
+        is_bvh  = _wf_hit_is_bvh[i]
+        bvh_mat = _wf_hit_bvh_mat[i]
+        bary_u  = _wf_hit_u[i]
+        bary_v  = _wf_hit_v[i]
+
+        mat_type  = 0
+        albedo    = ti.Vector([0.8, 0.8, 0.8])
+        roughness = 0.0
+        ior       = 1.0
+        emission  = 0.0
+
+        if is_bvh:
+            mat_type  = _mat_type[bvh_mat]
+            albedo    = _mat_albedo[bvh_mat]
+            roughness = _mat_roughness[bvh_mat]
+            ior       = _mat_ior[bvh_mat]
+            emission  = _mat_emission[bvh_mat]
+            albedo    = _bvh_albedo(idx, bvh_mat, bary_u, bary_v, albedo)
+        else:
+            mat_type  = _obj_mat_type[idx]
+            albedo    = _obj_albedo[idx]
+            roughness = _obj_roughness[idx]
+            ior       = _obj_ior[idx]
+            emission  = _obj_emission[idx]
+
+        if depth_idx == 0:
+            _wf_first_normal[i] = normal
+            _wf_first_albedo[i] = albedo
+            _wf_first_depth[i]  = t
+
+        throughput = _wf_throughput[i]
+
+        if mat_type == 3:   # emissive
+            _wf_color[i] += throughput * albedo * emission
+            _wf_active[i] = 0
+        else:
+            new_rd = ti.Vector([0.0, 0.0, 1.0])
+
+            if mat_type == 0:   # diffuse
+                if depth_idx < direct_light_max_depth:
+                    _wf_color[i] += throughput * direct_light_sample(
+                        hit_p, normal, albedo, direct_light_mode)
+                new_rd = diffuse_scatter(normal)
+                throughput *= albedo
+            elif mat_type == 1:  # metal
+                new_rd = metal_scatter(rd, normal, roughness)
+                throughput *= albedo
+            elif mat_type == 4:  # glossy
+                if depth_idx < direct_light_max_depth:
+                    _wf_color[i] += throughput * direct_light_sample(
+                        hit_p, normal, albedo, direct_light_mode) * roughness
+                new_rd = glossy_scatter(rd, normal, roughness)
+                throughput *= albedo
+            elif mat_type == 2:  # dielectric
+                current_ior = _wf_ior[i]
+                eta = 1.0
+                if front_face:
+                    eta = current_ior / ior
+                    _wf_ior[i] = ior
+                else:
+                    eta = current_ior / 1.0
+                    _wf_ior[i] = 1.0
+                new_rd = dielectric_scatter(rd, normal, eta)
+                throughput *= albedo
+
+            # Russian roulette
+            if depth_idx > 2:
+                rr = ti.max(throughput[0], ti.max(throughput[1], throughput[2]))
+                if ti.random() > rr:
+                    _wf_active[i] = 0
+                else:
+                    throughput /= rr
+
+            if _wf_active[i] != 0:
+                if depth_idx >= max_depth - 1:
+                    _wf_active[i] = 0
+                else:
+                    _wf_throughput[i] = throughput
+                    _wf_ro[i] = hit_p + normal * 1e-4
+                    _wf_rd[i] = new_rd
+
+
+@ti.kernel
+def wf_accumulate(W: int, H: int, frame: int, sample_clamp: float):
+    for y, x in ti.ndrange(H, W):
+        i = y * W + x
+        sample = _wf_color[i]
+        if sample_clamp > 0.0:
+            clamp_v = ti.Vector([sample_clamp, sample_clamp, sample_clamp])
+            sample = ti.min(ti.max(sample, ti.Vector([0.0, 0.0, 0.0])), clamp_v)
+
+        first_normal = _wf_first_normal[i]
+        first_albedo = _wf_first_albedo[i]
+        first_depth  = _wf_first_depth[i]
+
+        if frame == 0:
+            _accumulator[y, x]        = sample
+            _normal_accumulator[y, x] = first_normal
+            _albedo_accumulator[y, x] = first_albedo
+            _depth_accumulator[y, x]  = first_depth
+        else:
+            _accumulator[y, x] = (
+                _accumulator[y, x] * frame + sample
+            ) / (frame + 1)
+            _normal_accumulator[y, x] = (
+                _normal_accumulator[y, x] * frame + first_normal
+            ) / (frame + 1)
+            _albedo_accumulator[y, x] = (
+                _albedo_accumulator[y, x] * frame + first_albedo
+            ) / (frame + 1)
+            _depth_accumulator[y, x] = (
+                _depth_accumulator[y, x] * frame + first_depth
+            ) / (frame + 1)
+
+        _pixels[y, x] = ti.sqrt(ti.min(_accumulator[y, x], 1.0))
