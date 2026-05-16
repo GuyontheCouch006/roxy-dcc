@@ -58,7 +58,7 @@ def _sphere_light_sample(hit_p, center, radius):
 
 
 @ti.func
-def direct_light_sample(hit_p, normal, albedo, direct_light_mode, count_rays):
+def direct_light_sample(hit_p, normal, albedo, direct_light_mode):
     direct = ti.Vector([0.0, 0.0, 0.0])
     light_count = _n_lights[None]
     if light_count > 0:
@@ -75,8 +75,6 @@ def direct_light_sample(hit_p, normal, albedo, direct_light_mode, count_rays):
                     max_t = t_light * 0.999
                     if max_t > 0.001:
                         shadow_origin = hit_p + normal * 1e-4
-                        if count_rays:
-                            ti.atomic_add(_ray_count[None], 1)
                         if scene_occluded(shadow_origin, light_dir, max_t) == 0:
                             sample_weight = 1.0
                             if direct_light_mode == 0:
@@ -138,7 +136,7 @@ def _bvh_albedo(tri_idx, mat_idx, bary_u, bary_v, base_albedo):
 
 @ti.func
 def trace(ro, rd, max_depth, use_sky, bg_color,
-          direct_light_mode, direct_light_max_depth, count_rays):
+          direct_light_mode, direct_light_max_depth):
     color       = ti.Vector([0.0, 0.0, 0.0])
     throughput  = ti.Vector([1.0, 1.0, 1.0])
     current_ior = 1.0
@@ -147,8 +145,6 @@ def trace(ro, rd, max_depth, use_sky, bg_color,
     first_depth = 0.0
 
     for depth in range(max_depth):
-        if count_rays:
-            ti.atomic_add(_ray_count[None], 1)
         t, normal, idx, is_bvh, bvh_mat, bary_u, bary_v = scene_intersect(ro, rd)
 
         if t < 0.0 or t >= 1e9:
@@ -198,7 +194,7 @@ def trace(ro, rd, max_depth, use_sky, bg_color,
         elif mat_type == 0:  # diffuse
             if depth < direct_light_max_depth:
                 color += throughput * direct_light_sample(
-                    hit_p, normal, albedo, direct_light_mode, count_rays)
+                    hit_p, normal, albedo, direct_light_mode)
             rd = diffuse_scatter(normal)
             throughput *= albedo
 
@@ -209,7 +205,7 @@ def trace(ro, rd, max_depth, use_sky, bg_color,
         elif mat_type == 4:  # glossy
             if depth < direct_light_max_depth:
                 color += throughput * direct_light_sample(
-                    hit_p, normal, albedo, direct_light_mode, count_rays) * roughness
+                    hit_p, normal, albedo, direct_light_mode) * roughness
             rd = glossy_scatter(rd, normal, roughness)
             throughput *= albedo
 
@@ -253,12 +249,14 @@ def render_kernel(
     cam_up:    ti.types.vector(3, ti.f32),
 ):
     frame = _frame_count[None]
+    if count_rays:
+        ti.atomic_add(_ray_count[None], W * H)
     for y, x in ti.ndrange(H, W):
         rd = get_ray_direction(x, y, W, H, frame, fov_tan, aspect,
                                cam_fwd, cam_right, cam_up)
         sample, normal_sample, albedo_sample, depth_sample = trace(
             cam_pos, rd, max_depth, use_sky, bg_color,
-            direct_light_mode, direct_light_max_depth, count_rays)
+            direct_light_mode, direct_light_max_depth)
         if sample_clamp > 0.0:
             limit = ti.Vector([sample_clamp, sample_clamp, sample_clamp])
             sample = ti.min(ti.max(sample, ti.Vector([0.0, 0.0, 0.0])), limit)
