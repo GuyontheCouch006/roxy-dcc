@@ -1,4 +1,4 @@
-RENDER_BACKEND = "embree_wavefront"  # "embree_wavefront", "embree_preview", "taichi", or "python"
+RENDER_BACKEND = "taichi_wavefront"  # "taichi_wavefront", "taichi", "embree_wavefront", "embree_preview", or "python"
 DEBUG_LEVEL = 0   # 0=off  1=milestone timers  2=timers + cProfile
 
 import random
@@ -19,12 +19,14 @@ from rendering.startup_progress import StartupProgress
 def _startup_steps():
     if RENDER_BACKEND in ("embree_wavefront", "embree_preview"):
         return 10
-    if RENDER_BACKEND == "taichi":
+    if RENDER_BACKEND in ("taichi", "taichi_wavefront"):
         return 9
     return 8
 
 
 def _renderer_label():
+    if RENDER_BACKEND == "taichi_wavefront":
+        return "Taichi GPU wavefront path tracer"
     if RENDER_BACKEND == "embree_wavefront":
         return "Embree wavefront path tracer"
     if RENDER_BACKEND == "embree_preview":
@@ -34,8 +36,8 @@ def _renderer_label():
     if RENDER_BACKEND == "python":
         return "Python path tracer"
     raise ValueError(
-        "RENDER_BACKEND must be 'embree_wavefront', 'embree_preview', "
-        "'taichi', or 'python'"
+        "RENDER_BACKEND must be 'taichi_wavefront', 'taichi', "
+        "'embree_wavefront', 'embree_preview', or 'python'"
     )
 
 
@@ -324,10 +326,17 @@ def build_dragon(W, H):
         name="ground",
     ))
 
-def build_bicycle(W, H):
+def build_bicycle(W, H, progress=None):
     OBJ = "sample_scenes/roadBike/roadBike.obj"
-    root = OBJReader.load(OBJ)
+    if progress:
+        progress.step("Loading gallery mesh", OBJ)
+    root = OBJReader.load(OBJ, progress=progress.update if progress else None)
+    if progress:
+        progress.step("Inspecting gallery hierarchy")
     debug_scene_object(root)
+    if progress:
+        progress.step("Building scene objects", "Adding gallery geometry and ceiling lights.")
+        
     root.rotation = Vec3(0,-10,0)
     world = World(use_sky=True)
     world.add_object(root)
@@ -421,7 +430,7 @@ def main():
     progress.step("Starting Roxy", f"Preparing {W} x {H} render.")
     with timing.timed("build_gallery", tag="scene"):
         world = build_gallery(W, H, progress)
-
+        #world = build_bicycle(W, H, progress)
     progress.step("Allocating image buffer")
     image    = Image(W, H)
     progress.step("Opening viewport", "Creating the OpenGL preview window.")
@@ -431,10 +440,24 @@ def main():
         "Preparing renderer",
         _renderer_label(),
     )
-    if RENDER_BACKEND == "taichi":
-        tracer = TaichiRenderer(
+    if RENDER_BACKEND == "taichi_wavefront":
+        from rendering.taichi_wavefront_renderer import TaichiWavefrontRenderer
+
+        tracer = TaichiWavefrontRenderer(
             world, image, viewport,
             samples=2000,
+            max_depth=5,
+            direct_light_max_depth=1,
+            direct_light_mode="one",
+            denoise=True,
+            startup_progress=progress,
+        )
+    elif RENDER_BACKEND == "taichi":
+        from rendering.taichi_renderer import TaichiRenderer
+
+        tracer = TaichiRenderer(
+            world, image, viewport,
+            samples=3000,
             max_depth=5,
             direct_light_max_depth=1,
             direct_light_mode="one",
