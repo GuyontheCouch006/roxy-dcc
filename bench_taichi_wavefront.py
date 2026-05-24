@@ -128,9 +128,10 @@ def _load_world(scene, width, height):
 
 
 def _run_taichi(renderer_cls, backend_name, world, width, height,
-                load_seconds, samples, max_depth):
+                load_seconds, samples, max_depth, renderer_kwargs=None):
     from rendering.image import Image
     image = Image(width, height)
+    renderer_kwargs = renderer_kwargs or {}
 
     renderer = renderer_cls(
         world, image, viewport=None,
@@ -139,6 +140,7 @@ def _run_taichi(renderer_cls, backend_name, world, width, height,
         direct_light_mode="one",
         sample_clamp=10.0,
         direct_light_max_depth=1,
+        **renderer_kwargs,
     )
 
     # Timed render — suppress all output
@@ -224,6 +226,11 @@ def main():
         default="both",
         help="'both' runs mega-kernel then wavefront (default)",
     )
+    parser.add_argument(
+        "--compact-wavefront",
+        action="store_true",
+        help="run Taichi wavefront with compact active-ray queues enabled",
+    )
     args = parser.parse_args()
 
     width, height = args.resolution
@@ -253,9 +260,15 @@ def main():
               f"{r.rays_per_second:,.0f} rays/s total")
 
     if "wavefront" in selected:
-        print(f"\n[wavefront]  {width}x{height} @ {args.samples} samples …")
-        r = _run_taichi(TaichiWavefrontRenderer, "taichi-wavefront", world, width, height,
-                        load_seconds, args.samples, args.max_depth)
+        mode = "compact" if args.compact_wavefront else "full-sweep"
+        print(f"\n[wavefront:{mode}]  {width}x{height} @ {args.samples} samples …")
+        r = _run_taichi(
+            TaichiWavefrontRenderer,
+            f"wf-{mode}",
+            world, width, height,
+            load_seconds, args.samples, args.max_depth,
+            renderer_kwargs={"compact_rays": args.compact_wavefront},
+        )
         results.append(r)
         print(f"  done: total {r.total_seconds:.2f}s  steady {r.ms_per_frame:.1f} ms/frame  "
               f"{r.rays_per_second:,.0f} rays/s total")

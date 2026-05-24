@@ -8,7 +8,10 @@ from rendering.taichi.fields import (
     _pixels, _accumulator, _normal_accumulator, _albedo_accumulator,
     _depth_accumulator, _frame_count, _ray_count,
 )
-from rendering.taichi.wavefront import wf_generate, wf_traverse, wf_shade, wf_accumulate
+from rendering.taichi.wavefront import (
+    wf_generate, wf_traverse_full, wf_traverse,
+    wf_shade_full, wf_shade, wf_swap_queues, wf_accumulate,
+)
 from rendering.denoise import edge_aware_denoise, linear_to_display
 from rendering.render_stats import RenderStats
 
@@ -24,7 +27,7 @@ class TaichiWavefrontRenderer:
                  direct_light_mode="one", denoise=False,
                  denoise_radius=1, denoise_sigma=0.08, denoise_amount=0.8,
                  sample_clamp=10.0, direct_light_max_depth=1,
-                 startup_progress=None, count_rays=True):
+                 startup_progress=None, count_rays=True, compact_rays=False):
         self._world     = world
         self._image     = image
         self._viewport  = viewport
@@ -46,6 +49,7 @@ class TaichiWavefrontRenderer:
         self._last_timing = {}
         self._startup_progress = startup_progress
         self._count_rays = count_rays
+        self._compact_rays = compact_rays
 
     @staticmethod
     def _direct_light_mode_to_id(mode):
@@ -58,17 +62,29 @@ class TaichiWavefrontRenderer:
     def _run_sample(self, W, H, frame, fov_tan, aspect, use_sky, bg_color,
                     cam_pos, cam_fwd, cam_right, cam_up):
         count_rays = int(self._count_rays)
-        wf_generate(W, H, frame, fov_tan, aspect, count_rays,
+        compact_rays = int(self._compact_rays)
+        wf_generate(W, H, frame, fov_tan, aspect, count_rays, compact_rays,
                     cam_pos, cam_fwd, cam_right, cam_up)
         for depth_idx in range(self._max_depth):
-            wf_traverse(W, H, count_rays)
-            wf_shade(
-                W, H, depth_idx, use_sky, bg_color,
-                self._direct_light_mode_id,
-                self._direct_light_max_depth,
-                self._max_depth,
-                count_rays,
-            )
+            if self._compact_rays:
+                wf_traverse(W, H, count_rays)
+                wf_shade(
+                    W, H, depth_idx, use_sky, bg_color,
+                    self._direct_light_mode_id,
+                    self._direct_light_max_depth,
+                    self._max_depth,
+                    count_rays,
+                )
+                wf_swap_queues()
+            else:
+                wf_traverse_full(W, H, count_rays)
+                wf_shade_full(
+                    W, H, depth_idx, use_sky, bg_color,
+                    self._direct_light_mode_id,
+                    self._direct_light_max_depth,
+                    self._max_depth,
+                    count_rays,
+                )
         wf_accumulate(W, H, frame, self._sample_clamp, count_rays)
 
     @timing.timer("first frame (JIT compile)", tag="taichi")
@@ -226,4 +242,5 @@ class TaichiWavefrontRenderer:
     def __repr__(self):
         return (f"TaichiWavefrontRenderer(samples={self._samples}, "
                 f"max_depth={self._max_depth}, "
+                f"compact_rays={self._compact_rays}, "
                 f"direct_light_mode={self._direct_light_mode!r})")
