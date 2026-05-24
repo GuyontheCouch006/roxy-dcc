@@ -6,7 +6,7 @@ import core.timing as timing
 from rendering.taichi import extract_scene
 from rendering.taichi.fields import (
     _pixels, _accumulator, _normal_accumulator, _albedo_accumulator,
-    _depth_accumulator, _frame_count,
+    _depth_accumulator, _frame_count, _ray_count,
 )
 from rendering.taichi.wavefront import wf_generate, wf_traverse, wf_shade, wf_accumulate
 from rendering.denoise import edge_aware_denoise, linear_to_display
@@ -24,7 +24,7 @@ class TaichiWavefrontRenderer:
                  direct_light_mode="one", denoise=False,
                  denoise_radius=1, denoise_sigma=0.08, denoise_amount=0.8,
                  sample_clamp=10.0, direct_light_max_depth=1,
-                 startup_progress=None):
+                 startup_progress=None, count_rays=True):
         self._world     = world
         self._image     = image
         self._viewport  = viewport
@@ -43,7 +43,9 @@ class TaichiWavefrontRenderer:
         self._camera    = world.active_camera
         self._last_ray_count = 0
         self._last_stats = None
+        self._last_timing = {}
         self._startup_progress = startup_progress
+        self._count_rays = count_rays
 
     @staticmethod
     def _direct_light_mode_to_id(mode):
@@ -55,16 +57,19 @@ class TaichiWavefrontRenderer:
 
     def _run_sample(self, W, H, frame, fov_tan, aspect, use_sky, bg_color,
                     cam_pos, cam_fwd, cam_right, cam_up):
-        wf_generate(W, H, frame, fov_tan, aspect, cam_pos, cam_fwd, cam_right, cam_up)
+        count_rays = int(self._count_rays)
+        wf_generate(W, H, frame, fov_tan, aspect, count_rays,
+                    cam_pos, cam_fwd, cam_right, cam_up)
         for depth_idx in range(self._max_depth):
-            wf_traverse(W, H)
+            wf_traverse(W, H, count_rays)
             wf_shade(
                 W, H, depth_idx, use_sky, bg_color,
                 self._direct_light_mode_id,
                 self._direct_light_max_depth,
                 self._max_depth,
+                count_rays,
             )
-        wf_accumulate(W, H, frame, self._sample_clamp)
+        wf_accumulate(W, H, frame, self._sample_clamp, count_rays)
 
     @timing.timer("first frame (JIT compile)", tag="taichi")
     def _jit_frame(self, W, H, fov_tan, aspect, use_sky, bg_color,
@@ -115,16 +120,25 @@ class TaichiWavefrontRenderer:
                 "Extracting scene for GPU",
                 "Flattening objects, materials, lights, and textures.",
             )
+        extract_start = time.perf_counter()
         scene_stats = extract_scene(world)
+        extract_seconds = time.perf_counter() - extract_start
         _frame_count[None] = 0
+        total_rays_cast = 0
 
         if self._startup_progress:
             self._startup_progress.step(
                 "Compiling first GPU frame",
                 "Taichi is preparing wavefront kernels.",
             )
+        if self._count_rays:
+            _ray_count[None] = 0
+        jit_start = time.perf_counter()
         self._jit_frame(W, H, fov_tan, aspect, use_sky, bg_color,
                         cam_pos, cam_fwd, cam_right, cam_up)
+        jit_seconds = time.perf_counter() - jit_start
+        if self._count_rays:
+            total_rays_cast += int(_ray_count[None])
         if self._startup_progress:
             self._startup_progress.close()
             self._startup_progress = None
@@ -142,8 +156,12 @@ class TaichiWavefrontRenderer:
         for frame in range(1, target_samples):
             if self._viewport and self._viewport.should_close:
                 break
+            if self._count_rays:
+                _ray_count[None] = 0
             self._run_sample(W, H, frame, fov_tan, aspect, use_sky, bg_color,
                              cam_pos, cam_fwd, cam_right, cam_up)
+            if self._count_rays:
+                total_rays_cast += int(_ray_count[None])
             _frame_count[None] = frame + 1
             frames_rendered = frame + 1
 
@@ -155,23 +173,30 @@ class TaichiWavefrontRenderer:
 
             print(f"\r  sample {frame+1}/{target_samples}", end='', flush=True)
 
+        loop_elapsed = time.perf_counter() - t_loop_start
         if frames_rendered > 1:
             print()
-            loop_elapsed = time.perf_counter() - t_loop_start
             avg_ms = loop_elapsed / (frames_rendered - 1) * 1000
             print(timing._fmt("render", f"{frames_rendered - 1} steady-state frames",
                                loop_elapsed, f"avg {avg_ms:.1f} ms/frame"))
 
         self._copy_display_pixels(W, H, apply_denoise=True)
         elapsed = time.perf_counter() - render_start
-        self._last_ray_count = W * H * frames_rendered
+        self._last_ray_count = total_rays_cast
+        self._last_timing = {
+            'extract_seconds': extract_seconds,
+            'jit_seconds': jit_seconds,
+            'steady_seconds': loop_elapsed,
+            'steady_frames': max(0, frames_rendered - 1),
+            'total_seconds': elapsed,
+        }
         self._last_stats = RenderStats(
             width=W,
             height=H,
             samples_requested=self._samples,
             samples_rendered=frames_rendered,
             max_depth=self._max_depth,
-            rays_cast=self._last_ray_count,
+            rays_cast=total_rays_cast,
             elapsed_seconds=elapsed,
             primitive_count=scene_stats.get('primitive_count', 0),
             bvh_nodes=scene_stats.get('bvh_nodes', 0),
@@ -193,6 +218,10 @@ class TaichiWavefrontRenderer:
     @property
     def last_stats(self):
         return self._last_stats
+
+    @property
+    def last_timing(self):
+        return self._last_timing
 
     def __repr__(self):
         return (f"TaichiWavefrontRenderer(samples={self._samples}, "

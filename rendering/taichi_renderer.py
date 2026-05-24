@@ -27,7 +27,7 @@ class TaichiRenderer:
                  direct_light_mode="one", denoise=False,
                  denoise_radius=1, denoise_sigma=0.08, denoise_amount=0.8,
                  sample_clamp=10.0, direct_light_max_depth=1,
-                 startup_progress=None):
+                 startup_progress=None, count_rays=True):
         self._world     = world
         self._image     = image
         self._viewport  = viewport
@@ -46,7 +46,9 @@ class TaichiRenderer:
         self._camera    = world.active_camera
         self._last_ray_count = 0
         self._last_stats = None
+        self._last_timing = {}
         self._startup_progress = startup_progress
+        self._count_rays = count_rays
 
     @staticmethod
     def _direct_light_mode_to_id(mode):
@@ -61,7 +63,7 @@ class TaichiRenderer:
                    cam_pos, cam_fwd, cam_right, cam_up):
         render_kernel(W, H, fov_tan, aspect, self._max_depth, use_sky,
                       self._direct_light_mode_id, self._direct_light_max_depth,
-                      self._sample_clamp, int(timing.LEVEL >= 1), bg_color,
+                      self._sample_clamp, int(self._count_rays), bg_color,
                       cam_pos, cam_fwd, cam_right, cam_up)
 
     @timing.timer("denoise", tag="render")
@@ -107,7 +109,9 @@ class TaichiRenderer:
                 "Extracting scene for GPU",
                 "Flattening objects, materials, lights, and textures.",
             )
+        extract_start = time.perf_counter()
         scene_stats = extract_scene(world)
+        extract_seconds = time.perf_counter() - extract_start
         _frame_count[None] = 0
         total_rays_cast = 0
 
@@ -119,13 +123,15 @@ class TaichiRenderer:
                 "Compiling first GPU frame",
                 "Taichi is preparing kernels and uploading render buffers.",
             )
-        if timing.LEVEL >= 1:
+        if self._count_rays:
             _ray_count[None] = 0
+        jit_start = time.perf_counter()
         self._jit_frame(*args)
+        jit_seconds = time.perf_counter() - jit_start
         if self._startup_progress:
             self._startup_progress.close()
             self._startup_progress = None
-        if timing.LEVEL >= 1:
+        if self._count_rays:
             total_rays_cast += int(_ray_count[None])
         _frame_count[None] = 1
         self._copy_display_pixels(W, H)
@@ -140,7 +146,7 @@ class TaichiRenderer:
         for frame in range(1, target_samples):
             if self._viewport and self._viewport.should_close:
                 break
-            count_rays = int(timing.LEVEL >= 1)
+            count_rays = int(self._count_rays)
             if count_rays:
                 _ray_count[None] = 0
             render_kernel(W, H, fov_tan, aspect, self._max_depth, use_sky,
@@ -160,15 +166,23 @@ class TaichiRenderer:
 
             print(f"\r  sample {frame+1}/{target_samples}", end='', flush=True)
 
+        loop_elapsed = time.perf_counter() - t_loop_start
         if timing.LEVEL >= 1 and frames_rendered > 1:
             print()
-            loop_elapsed = time.perf_counter() - t_loop_start
             avg_ms = loop_elapsed / (frames_rendered - 1) * 1000
             print(timing._fmt("render", f"{frames_rendered - 1} steady-state frames",
                                loop_elapsed, f"avg {avg_ms:.1f} ms/frame"))
 
         self._copy_display_pixels(W, H, apply_denoise=True)
         self._last_ray_count = total_rays_cast
+        elapsed = time.perf_counter() - render_start
+        self._last_timing = {
+            'extract_seconds': extract_seconds,
+            'jit_seconds': jit_seconds,
+            'steady_seconds': loop_elapsed,
+            'steady_frames': max(0, frames_rendered - 1),
+            'total_seconds': elapsed,
+        }
         self._last_stats = RenderStats(
             width=W,
             height=H,
@@ -176,7 +190,7 @@ class TaichiRenderer:
             samples_rendered=frames_rendered,
             max_depth=self._max_depth,
             rays_cast=total_rays_cast,
-            elapsed_seconds=time.perf_counter() - render_start,
+            elapsed_seconds=elapsed,
             primitive_count=scene_stats.get('primitive_count', 0),
             bvh_nodes=scene_stats.get('bvh_nodes', 0),
             bvh_triangles=scene_stats.get('bvh_triangles', 0),
@@ -197,6 +211,10 @@ class TaichiRenderer:
     @property
     def last_stats(self):
         return self._last_stats
+
+    @property
+    def last_timing(self):
+        return self._last_timing
 
     def __repr__(self):
         return (f"TaichiRenderer(samples={self._samples}, max_depth={self._max_depth}, "
