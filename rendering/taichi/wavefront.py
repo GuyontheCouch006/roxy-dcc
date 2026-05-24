@@ -5,19 +5,64 @@ from rendering.taichi.fields import (
     _normal_accumulator, _albedo_accumulator, _depth_accumulator,
     _obj_albedo, _obj_mat_type, _obj_roughness, _obj_ior, _obj_emission,
     _mat_type, _mat_albedo, _mat_roughness, _mat_ior, _mat_emission,
+    _light_center, _light_radius, _light_albedo, _light_emission, _n_lights,
     _ray_count,
     _wf_ro, _wf_rd, _wf_throughput, _wf_ior, _wf_active, _wf_color,
     _wf_ray_count,
     _wf_curr_indices, _wf_next_indices, _wf_curr_count, _wf_next_count,
+    _wf_shadow_ro, _wf_shadow_rd, _wf_shadow_max_t, _wf_shadow_contrib,
+    _wf_shadow_pixel, _wf_shadow_count,
     _wf_first_normal, _wf_first_albedo, _wf_first_depth,
     _wf_hit_t, _wf_hit_u, _wf_hit_v,
     _wf_hit_tri, _wf_hit_is_bvh, _wf_hit_bvh_mat, _wf_hit_normal,
 )
 from rendering.taichi.camera import get_ray_direction
-from rendering.taichi.intersect import scene_intersect
-from rendering.taichi.trace import direct_light_sample, _bvh_albedo
+from rendering.taichi.intersect import scene_intersect, scene_occluded
+from rendering.taichi.trace import direct_light_sample, _sphere_light_sample, _bvh_albedo
 from rendering.taichi.scatter import diffuse_scatter, metal_scatter, dielectric_scatter, glossy_scatter
 from rendering.taichi.sky import sky_color
+
+
+@ti.func
+def _direct_light_enqueue_or_inline(
+    pixel_idx, hit_p, normal, albedo, throughput,
+    direct_light_mode, count_rays, split_direct_light, strength,
+):
+    if split_direct_light and direct_light_mode == 0:
+        light_count = _n_lights[None]
+        if light_count > 0:
+            light_idx = ti.min(ti.cast(ti.random() * light_count, ti.i32), light_count - 1)
+            light_dir, t_light, solid_angle_scale = _sphere_light_sample(
+                hit_p, _light_center[light_idx], _light_radius[light_idx])
+            ndotl = normal.dot(light_dir)
+
+            if ndotl > 0.0:
+                max_t = t_light * 0.999
+                if max_t > 0.001:
+                    if count_rays:
+                        _wf_ray_count[pixel_idx] += 1
+                    slot = ti.atomic_add(_wf_shadow_count[None], 1)
+                    sample_weight = ti.cast(light_count, ti.f32)
+                    _wf_shadow_pixel[slot] = pixel_idx
+                    _wf_shadow_ro[slot] = hit_p + normal * 1e-4
+                    _wf_shadow_rd[slot] = light_dir
+                    _wf_shadow_max_t[slot] = max_t
+                    _wf_shadow_contrib[slot] = (
+                        throughput *
+                        albedo *
+                        _light_albedo[light_idx] *
+                        _light_emission[light_idx] *
+                        ndotl *
+                        solid_angle_scale *
+                        sample_weight *
+                        strength
+                    )
+    else:
+        direct, shadow_rays = direct_light_sample(
+            hit_p, normal, albedo, direct_light_mode)
+        _wf_color[pixel_idx] += throughput * direct * strength
+        if count_rays:
+            _wf_ray_count[pixel_idx] += shadow_rays
 
 
 @ti.kernel
@@ -99,7 +144,9 @@ def wf_shade_full(
     direct_light_max_depth: int,
     max_depth: int,
     count_rays: int,
+    split_direct_light: int,
 ):
+    _wf_shadow_count[None] = 0
     for y, x in ti.ndrange(H, W):
         i = y * W + x
         if _wf_active[i] == 0:
@@ -165,11 +212,10 @@ def wf_shade_full(
 
             if mat_type == 0:
                 if depth_idx < direct_light_max_depth:
-                    direct, shadow_rays = direct_light_sample(
-                        hit_p, normal, albedo, direct_light_mode)
-                    _wf_color[i] += throughput * direct
-                    if count_rays:
-                        _wf_ray_count[i] += shadow_rays
+                    _direct_light_enqueue_or_inline(
+                        i, hit_p, normal, albedo, throughput,
+                        direct_light_mode, count_rays, split_direct_light, 1.0,
+                    )
                 new_rd = diffuse_scatter(normal)
                 throughput *= albedo
             elif mat_type == 1:
@@ -177,11 +223,10 @@ def wf_shade_full(
                 throughput *= albedo
             elif mat_type == 4:
                 if depth_idx < direct_light_max_depth:
-                    direct, shadow_rays = direct_light_sample(
-                        hit_p, normal, albedo, direct_light_mode)
-                    _wf_color[i] += throughput * direct * roughness
-                    if count_rays:
-                        _wf_ray_count[i] += shadow_rays
+                    _direct_light_enqueue_or_inline(
+                        i, hit_p, normal, albedo, throughput,
+                        direct_light_mode, count_rays, split_direct_light, roughness,
+                    )
                 new_rd = glossy_scatter(rd, normal, roughness)
                 throughput *= albedo
             elif mat_type == 2:
@@ -222,8 +267,10 @@ def wf_shade(
     direct_light_max_depth: int,
     max_depth: int,
     count_rays: int,
+    split_direct_light: int,
 ):
     _wf_next_count[None] = 0
+    _wf_shadow_count[None] = 0
     for q in range(_wf_curr_count[None]):
         i = _wf_curr_indices[q]
         if _wf_active[i] == 0:
@@ -289,11 +336,10 @@ def wf_shade(
 
             if mat_type == 0:   # diffuse
                 if depth_idx < direct_light_max_depth:
-                    direct, shadow_rays = direct_light_sample(
-                        hit_p, normal, albedo, direct_light_mode)
-                    _wf_color[i] += throughput * direct
-                    if count_rays:
-                        _wf_ray_count[i] += shadow_rays
+                    _direct_light_enqueue_or_inline(
+                        i, hit_p, normal, albedo, throughput,
+                        direct_light_mode, count_rays, split_direct_light, 1.0,
+                    )
                 new_rd = diffuse_scatter(normal)
                 throughput *= albedo
             elif mat_type == 1:  # metal
@@ -301,11 +347,10 @@ def wf_shade(
                 throughput *= albedo
             elif mat_type == 4:  # glossy
                 if depth_idx < direct_light_max_depth:
-                    direct, shadow_rays = direct_light_sample(
-                        hit_p, normal, albedo, direct_light_mode)
-                    _wf_color[i] += throughput * direct * roughness
-                    if count_rays:
-                        _wf_ray_count[i] += shadow_rays
+                    _direct_light_enqueue_or_inline(
+                        i, hit_p, normal, albedo, throughput,
+                        direct_light_mode, count_rays, split_direct_light, roughness,
+                    )
                 new_rd = glossy_scatter(rd, normal, roughness)
                 throughput *= albedo
             elif mat_type == 2:  # dielectric
@@ -337,6 +382,14 @@ def wf_shade(
                     _wf_rd[i] = new_rd
                     slot = ti.atomic_add(_wf_next_count[None], 1)
                     _wf_next_indices[slot] = i
+
+
+@ti.kernel
+def wf_resolve_shadows():
+    for slot in range(_wf_shadow_count[None]):
+        pixel_idx = _wf_shadow_pixel[slot]
+        if scene_occluded(_wf_shadow_ro[slot], _wf_shadow_rd[slot], _wf_shadow_max_t[slot]) == 0:
+            _wf_color[pixel_idx] += _wf_shadow_contrib[slot]
 
 
 @ti.kernel

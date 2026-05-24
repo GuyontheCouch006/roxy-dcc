@@ -231,6 +231,11 @@ def main():
         action="store_true",
         help="run Taichi wavefront with compact active-ray queues enabled",
     )
+    parser.add_argument(
+        "--inline-direct-light",
+        action="store_true",
+        help="keep wavefront direct-light shadow traversal inside the shade kernel",
+    )
     args = parser.parse_args()
 
     width, height = args.resolution
@@ -267,7 +272,10 @@ def main():
             f"wf-{mode}",
             world, width, height,
             load_seconds, args.samples, args.max_depth,
-            renderer_kwargs={"compact_rays": args.compact_wavefront},
+            renderer_kwargs={
+                "compact_rays": args.compact_wavefront,
+                "split_direct_light": not args.inline_direct_light,
+            },
         )
         results.append(r)
         print(f"  done: total {r.total_seconds:.2f}s  steady {r.ms_per_frame:.1f} ms/frame  "
