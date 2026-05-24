@@ -14,6 +14,10 @@ from rendering.taichi.fields import (
 )
 
 
+BVH_STACK_SIZE = 64
+BVH_STACK_LAST = BVH_STACK_SIZE - 1
+
+
 @ti.func
 def make_inv_dir(rd):
     inv_d = ti.Vector([0.0, 0.0, 0.0])
@@ -81,8 +85,8 @@ def bvh_triangle_intersect(ro, rd, v0, v1, v2):
 @ti.func
 def bvh_intersect(ro, rd):
     """Traverse BVH with an explicit stack. Returns (t, tri_idx, u, v)."""
-    stack      = ti.Vector.zero(ti.i32, 32)
-    stack_t    = ti.Vector.zero(ti.f32, 32)
+    stack      = ti.Vector.zero(ti.i32, BVH_STACK_SIZE)
+    stack_t    = ti.Vector.zero(ti.f32, BVH_STACK_SIZE)
     stack_ptr  = -1
     inv_d      = make_inv_dir(rd)
 
@@ -126,30 +130,36 @@ def bvh_intersect(ro, rd):
 
             if left_hit and right_hit:
                 if left_t < right_t:
-                    if stack_ptr < 30:
+                    if stack_ptr < BVH_STACK_LAST - 1:
                         stack_ptr += 1
                         stack[stack_ptr] = right
                         stack_t[stack_ptr] = right_t
-                    if stack_ptr < 30:
+                        stack_ptr += 1
+                        stack[stack_ptr] = left
+                        stack_t[stack_ptr] = left_t
+                    elif stack_ptr < BVH_STACK_LAST:
                         stack_ptr += 1
                         stack[stack_ptr] = left
                         stack_t[stack_ptr] = left_t
                 else:
-                    if stack_ptr < 30:
+                    if stack_ptr < BVH_STACK_LAST - 1:
                         stack_ptr += 1
                         stack[stack_ptr] = left
                         stack_t[stack_ptr] = left_t
-                    if stack_ptr < 30:
+                        stack_ptr += 1
+                        stack[stack_ptr] = right
+                        stack_t[stack_ptr] = right_t
+                    elif stack_ptr < BVH_STACK_LAST:
                         stack_ptr += 1
                         stack[stack_ptr] = right
                         stack_t[stack_ptr] = right_t
             elif left_hit:
-                if stack_ptr < 31:
+                if stack_ptr < BVH_STACK_LAST:
                     stack_ptr += 1
                     stack[stack_ptr] = left
                     stack_t[stack_ptr] = left_t
             elif right_hit:
-                if stack_ptr < 31:
+                if stack_ptr < BVH_STACK_LAST:
                     stack_ptr += 1
                     stack[stack_ptr] = right
                     stack_t[stack_ptr] = right_t
@@ -162,8 +172,8 @@ def bvh_occluded(ro, rd, max_t):
     """Return 1 if any BVH triangle blocks the ray before max_t."""
     occluded = 0
 
-    stack     = ti.Vector.zero(ti.i32, 32)
-    stack_t   = ti.Vector.zero(ti.f32, 32)
+    stack     = ti.Vector.zero(ti.i32, BVH_STACK_SIZE)
+    stack_t   = ti.Vector.zero(ti.f32, BVH_STACK_SIZE)
     stack_ptr = -1
     inv_d     = make_inv_dir(rd)
 
@@ -199,30 +209,36 @@ def bvh_occluded(ro, rd, max_t):
 
             if left_hit and right_hit:
                 if left_t < right_t:
-                    if stack_ptr < 30:
+                    if stack_ptr < BVH_STACK_LAST - 1:
                         stack_ptr += 1
                         stack[stack_ptr] = right
                         stack_t[stack_ptr] = right_t
-                    if stack_ptr < 30:
+                        stack_ptr += 1
+                        stack[stack_ptr] = left
+                        stack_t[stack_ptr] = left_t
+                    elif stack_ptr < BVH_STACK_LAST:
                         stack_ptr += 1
                         stack[stack_ptr] = left
                         stack_t[stack_ptr] = left_t
                 else:
-                    if stack_ptr < 30:
+                    if stack_ptr < BVH_STACK_LAST - 1:
                         stack_ptr += 1
                         stack[stack_ptr] = left
                         stack_t[stack_ptr] = left_t
-                    if stack_ptr < 30:
+                        stack_ptr += 1
+                        stack[stack_ptr] = right
+                        stack_t[stack_ptr] = right_t
+                    elif stack_ptr < BVH_STACK_LAST:
                         stack_ptr += 1
                         stack[stack_ptr] = right
                         stack_t[stack_ptr] = right_t
             elif left_hit:
-                if stack_ptr < 31:
+                if stack_ptr < BVH_STACK_LAST:
                     stack_ptr += 1
                     stack[stack_ptr] = left
                     stack_t[stack_ptr] = left_t
             elif right_hit:
-                if stack_ptr < 31:
+                if stack_ptr < BVH_STACK_LAST:
                     stack_ptr += 1
                     stack[stack_ptr] = right
                     stack_t[stack_ptr] = right_t

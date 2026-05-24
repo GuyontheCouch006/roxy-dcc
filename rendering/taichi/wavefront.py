@@ -5,7 +5,9 @@ from rendering.taichi.fields import (
     _normal_accumulator, _albedo_accumulator, _depth_accumulator,
     _obj_albedo, _obj_mat_type, _obj_roughness, _obj_ior, _obj_emission,
     _mat_type, _mat_albedo, _mat_roughness, _mat_ior, _mat_emission,
+    _ray_count,
     _wf_ro, _wf_rd, _wf_throughput, _wf_ior, _wf_active, _wf_color,
+    _wf_ray_count,
     _wf_first_normal, _wf_first_albedo, _wf_first_depth,
     _wf_hit_t, _wf_hit_u, _wf_hit_v,
     _wf_hit_tri, _wf_hit_is_bvh, _wf_hit_bvh_mat, _wf_hit_normal,
@@ -21,6 +23,7 @@ from rendering.taichi.sky import sky_color
 def wf_generate(
     W: int, H: int, frame: int,
     fov_tan: float, aspect: float,
+    count_rays: int,
     cam_pos:   ti.types.vector(3, ti.f32),
     cam_fwd:   ti.types.vector(3, ti.f32),
     cam_right: ti.types.vector(3, ti.f32),
@@ -39,13 +42,17 @@ def wf_generate(
         _wf_first_normal[i] = ti.Vector([0.0, 0.0, 0.0])
         _wf_first_albedo[i] = ti.Vector([0.0, 0.0, 0.0])
         _wf_first_depth[i]  = 0.0
+        if count_rays:
+            _wf_ray_count[i] = 0
 
 
 @ti.kernel
-def wf_traverse(W: int, H: int):
+def wf_traverse(W: int, H: int, count_rays: int):
     for y, x in ti.ndrange(H, W):
         i = y * W + x
         if _wf_active[i]:
+            if count_rays:
+                _wf_ray_count[i] += 1
             t, normal, idx, is_bvh, bvh_mat, u, v = scene_intersect(
                 _wf_ro[i], _wf_rd[i])
             _wf_hit_t[i]       = t
@@ -66,6 +73,7 @@ def wf_shade(
     direct_light_mode: int,
     direct_light_max_depth: int,
     max_depth: int,
+    count_rays: int,
 ):
     for y, x in ti.ndrange(H, W):
         i = y * W + x
@@ -132,8 +140,11 @@ def wf_shade(
 
             if mat_type == 0:   # diffuse
                 if depth_idx < direct_light_max_depth:
-                    _wf_color[i] += throughput * direct_light_sample(
+                    direct, shadow_rays = direct_light_sample(
                         hit_p, normal, albedo, direct_light_mode)
+                    _wf_color[i] += throughput * direct
+                    if count_rays:
+                        _wf_ray_count[i] += shadow_rays
                 new_rd = diffuse_scatter(normal)
                 throughput *= albedo
             elif mat_type == 1:  # metal
@@ -141,8 +152,11 @@ def wf_shade(
                 throughput *= albedo
             elif mat_type == 4:  # glossy
                 if depth_idx < direct_light_max_depth:
-                    _wf_color[i] += throughput * direct_light_sample(
-                        hit_p, normal, albedo, direct_light_mode) * roughness
+                    direct, shadow_rays = direct_light_sample(
+                        hit_p, normal, albedo, direct_light_mode)
+                    _wf_color[i] += throughput * direct * roughness
+                    if count_rays:
+                        _wf_ray_count[i] += shadow_rays
                 new_rd = glossy_scatter(rd, normal, roughness)
                 throughput *= albedo
             elif mat_type == 2:  # dielectric
@@ -175,7 +189,7 @@ def wf_shade(
 
 
 @ti.kernel
-def wf_accumulate(W: int, H: int, frame: int, sample_clamp: float):
+def wf_accumulate(W: int, H: int, frame: int, sample_clamp: float, count_rays: int):
     for y, x in ti.ndrange(H, W):
         i = y * W + x
         sample = _wf_color[i]
@@ -207,3 +221,5 @@ def wf_accumulate(W: int, H: int, frame: int, sample_clamp: float):
             ) / (frame + 1)
 
         _pixels[y, x] = ti.sqrt(ti.min(_accumulator[y, x], 1.0))
+        if count_rays:
+            ti.atomic_add(_ray_count[None], _wf_ray_count[i])
