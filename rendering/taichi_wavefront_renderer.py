@@ -10,7 +10,7 @@ from rendering.taichi.fields import (
 )
 from rendering.taichi.wavefront import (
     wf_generate, wf_traverse_full, wf_traverse,
-    wf_shade_full, wf_shade, wf_swap_queues, wf_accumulate,
+    wf_shade_full, wf_shade, wf_resolve_shadows, wf_swap_queues, wf_accumulate,
 )
 from rendering.denoise import edge_aware_denoise, linear_to_display
 from rendering.render_stats import RenderStats
@@ -27,7 +27,8 @@ class TaichiWavefrontRenderer:
                  direct_light_mode="one", denoise=False,
                  denoise_radius=1, denoise_sigma=0.08, denoise_amount=0.8,
                  sample_clamp=10.0, direct_light_max_depth=1,
-                 startup_progress=None, count_rays=True, compact_rays=False):
+                 startup_progress=None, count_rays=True, compact_rays=False,
+                 split_direct_light=True):
         self._world     = world
         self._image     = image
         self._viewport  = viewport
@@ -50,6 +51,7 @@ class TaichiWavefrontRenderer:
         self._startup_progress = startup_progress
         self._count_rays = count_rays
         self._compact_rays = compact_rays
+        self._split_direct_light = split_direct_light
 
     @staticmethod
     def _direct_light_mode_to_id(mode):
@@ -63,6 +65,7 @@ class TaichiWavefrontRenderer:
                     cam_pos, cam_fwd, cam_right, cam_up):
         count_rays = int(self._count_rays)
         compact_rays = int(self._compact_rays)
+        split_direct_light = int(self._split_direct_light)
         wf_generate(W, H, frame, fov_tan, aspect, count_rays, compact_rays,
                     cam_pos, cam_fwd, cam_right, cam_up)
         for depth_idx in range(self._max_depth):
@@ -74,7 +77,10 @@ class TaichiWavefrontRenderer:
                     self._direct_light_max_depth,
                     self._max_depth,
                     count_rays,
+                    split_direct_light,
                 )
+                if self._split_direct_light:
+                    wf_resolve_shadows()
                 wf_swap_queues()
             else:
                 wf_traverse_full(W, H, count_rays)
@@ -84,7 +90,10 @@ class TaichiWavefrontRenderer:
                     self._direct_light_max_depth,
                     self._max_depth,
                     count_rays,
+                    split_direct_light,
                 )
+                if self._split_direct_light:
+                    wf_resolve_shadows()
         wf_accumulate(W, H, frame, self._sample_clamp, count_rays)
 
     @timing.timer("first frame (JIT compile)", tag="taichi")
@@ -243,4 +252,5 @@ class TaichiWavefrontRenderer:
         return (f"TaichiWavefrontRenderer(samples={self._samples}, "
                 f"max_depth={self._max_depth}, "
                 f"compact_rays={self._compact_rays}, "
+                f"split_direct_light={self._split_direct_light}, "
                 f"direct_light_mode={self._direct_light_mode!r})")

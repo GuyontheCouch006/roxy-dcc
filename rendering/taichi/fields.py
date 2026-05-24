@@ -103,6 +103,13 @@ _wf_next_indices = ti.field(dtype=ti.i32,         shape=MAX_RAYS)
 _wf_curr_count = ti.field(dtype=ti.i32,           shape=())
 _wf_next_count = ti.field(dtype=ti.i32,           shape=())
 
+_wf_shadow_ro      = ti.Vector.field(3, dtype=ti.f32, shape=MAX_RAYS)
+_wf_shadow_rd      = ti.Vector.field(3, dtype=ti.f32, shape=MAX_RAYS)
+_wf_shadow_max_t   = ti.field(dtype=ti.f32,           shape=MAX_RAYS)
+_wf_shadow_contrib = ti.Vector.field(3, dtype=ti.f32, shape=MAX_RAYS)
+_wf_shadow_pixel   = ti.field(dtype=ti.i32,           shape=MAX_RAYS)
+_wf_shadow_count   = ti.field(dtype=ti.i32,           shape=())
+
 # First-hit data for denoising accumulators (written once per sample)
 _wf_first_normal = ti.Vector.field(3, dtype=ti.f32, shape=MAX_RAYS)
 _wf_first_albedo = ti.Vector.field(3, dtype=ti.f32, shape=MAX_RAYS)
