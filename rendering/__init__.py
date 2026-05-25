@@ -6,6 +6,11 @@
 # ============================================
 
 from rendering.ray_tracer import RayTracer
-from rendering.gl_viewport import GLViewport, ViewportCamera, build_scene_viewport_buffers
+from rendering.gl_viewport import (
+    GLViewport,
+    ViewportCamera,
+    build_scene_viewport_buffers,
+    pick_scene_object,
+)
 from rendering.image import Image
 from rendering.render_stats import RenderStats
