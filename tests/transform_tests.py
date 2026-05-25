@@ -7,7 +7,7 @@
 # ============================================
 
 import math
-from core import Transform, Vec3, RotationOrder
+from core import Transform, Mat4x4, Vec3, RotationOrder
 from tests.utils import run_tests, approx_eq, vec3_approx_eq
 
 
@@ -37,6 +37,35 @@ def test_default_matrix_is_identity():
             expected = 1.0 if i == j else 0.0
             assert approx_eq(identity.rows[i][j], expected), \
                 f"[{i}][{j}] expected {expected}, got {identity.rows[i][j]}"
+
+def test_matrix_constructor_uses_matrix_directly():
+    t = Transform(matrix=Mat4x4.translation(4, 5, 6))
+
+    assert t.matrix_mode
+    assert vec3_approx_eq(t.world_matrix.transform_point(Vec3(0, 0, 0)), Vec3(4, 5, 6))
+    assert vec3_approx_eq(t.world_inverse_matrix.transform_point(Vec3(4, 5, 6)), Vec3(0, 0, 0))
+
+def test_matrix_setter_enables_matrix_mode():
+    t = Transform()
+    t.matrix = Mat4x4.translation(1, 2, 3)
+
+    assert t.matrix_mode
+    assert vec3_approx_eq(t.world_matrix.transform_point(Vec3(0, 0, 0)), Vec3(1, 2, 3))
+
+def test_component_setter_leaves_matrix_mode():
+    t = Transform(matrix=Mat4x4.translation(4, 5, 6))
+    t.translation = Vec3(1, 0, 0)
+
+    assert not t.matrix_mode
+    assert vec3_approx_eq(t.world_matrix.transform_point(Vec3(0, 0, 0)), Vec3(1, 0, 0))
+
+def test_matrix_transform_round_trips_through_dict():
+    t = Transform(matrix=Mat4x4.translation(7, 8, 9))
+
+    restored = Transform.from_dict(t.to_dict())
+
+    assert restored.matrix_mode
+    assert vec3_approx_eq(restored.world_matrix.transform_point(Vec3(0, 0, 0)), Vec3(7, 8, 9))
 
 
 # --- dirty flag ---
@@ -182,6 +211,10 @@ if __name__ == "__main__":
         test_default_rotation,
         test_default_not_dirty,
         test_default_matrix_is_identity,
+        test_matrix_constructor_uses_matrix_directly,
+        test_matrix_setter_enables_matrix_mode,
+        test_component_setter_leaves_matrix_mode,
+        test_matrix_transform_round_trips_through_dict,
         test_setter_marks_dirty,
         test_accessing_world_matrix_clears_dirty,
         test_accessing_world_inverse_clears_dirty,

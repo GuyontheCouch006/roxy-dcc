@@ -7,7 +7,7 @@
 #              in local space; results are transformed back to world space.
 # ============================================
 
-from core import Transform, HitRecord, Ray, RotationOrder, Vec3
+from core import Transform, HitRecord, Mat4x4, Ray, RotationOrder, Vec3
 
 
 class SceneObject:
@@ -29,6 +29,8 @@ class SceneObject:
         scale=None,
         shear=None,
         pivot=None,
+        matrix=None,
+        inverse_matrix=None,
         visible=True,
         renderable=True,
         selectable=True,
@@ -57,6 +59,8 @@ class SceneObject:
             scale=scale,
             shear=shear,
             pivot=pivot,
+            matrix=matrix,
+            inverse_matrix=inverse_matrix,
             shape=first_geo,
             rotation_order=rotation_order,
         )
@@ -95,6 +99,18 @@ class SceneObject:
     @property
     def world_inverse_transpose_matrix(self):
         return self.world_inverse_matrix.transpose()
+
+    @property
+    def local_matrix(self):
+        return self._transform.world_matrix
+
+    @local_matrix.setter
+    def local_matrix(self, value):
+        self._transform.matrix = value
+
+    @property
+    def local_inverse_matrix(self):
+        return self._transform.world_inverse_matrix
 
     @property
     def world_aabb(self):
@@ -276,6 +292,9 @@ class SceneObject:
     def rotation_order(self, value): self._transform.rotation_order = value
 
     @property
+    def matrix_mode(self): return self._transform.matrix_mode
+
+    @property
     def visible(self): return self._visible
 
     @visible.setter
@@ -422,18 +441,29 @@ class SceneObject:
                 name=data.get("name", ""),
             )]
 
+        transform_data = data["transform"]
+        transform_kwargs = {}
+        if transform_data.get("mode") == "matrix" or "matrix" in transform_data:
+            transform_kwargs["matrix"] = Mat4x4(transform_data["matrix"])
+            if transform_data.get("inverse_matrix") is not None:
+                transform_kwargs["inverse_matrix"] = Mat4x4(transform_data["inverse_matrix"])
+        else:
+            transform_kwargs.update({
+                "translation": Vec3.from_dict(transform_data["translation"]),
+                "rotation": Vec3.from_dict(transform_data["rotation"]),
+                "scale": Vec3.from_dict(transform_data["scale"]),
+                "shear": Vec3.from_dict(transform_data["shear"]),
+                "pivot": Vec3.from_dict(transform_data["pivot"]),
+                "rotation_order": RotationOrder(transform_data["rotation_order"]),
+            })
+
         obj = cls(
             name=data["name"],
             shapes=shapes,
-            translation=Vec3.from_dict(data["transform"]["translation"]),
-            rotation=Vec3.from_dict(data["transform"]["rotation"]),
-            scale=Vec3.from_dict(data["transform"]["scale"]),
-            shear=Vec3.from_dict(data["transform"]["shear"]),
-            pivot=Vec3.from_dict(data["transform"]["pivot"]),
-            rotation_order=RotationOrder(data["transform"]["rotation_order"]),
             visible=data["visible"],
             renderable=data["renderable"],
             selectable=data["selectable"],
+            **transform_kwargs,
         )
         for child_data in data.get("children", []):
             obj.add_child(cls.from_dict(child_data))

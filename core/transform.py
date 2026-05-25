@@ -23,6 +23,8 @@ class Transform:
         scale=None,
         shear=None,
         pivot=None,
+        matrix=None,
+        inverse_matrix=None,
         rotation_order=RotationOrder.XYZ,
         shape=None,
     ):
@@ -33,39 +35,64 @@ class Transform:
         self._pivot = pivot if pivot is not None else Vec3(0, 0, 0)
         self._rotation_order = rotation_order
         self._shape = shape
+        self._matrix_mode = matrix is not None
 
-        self._matrix = Mat4x4.from_trs(
-            self._translation, self._rotation, self._scale,
-            self._shear, self._pivot, self._rotation_order,
-        )
-        self._inverse_matrix = Mat4x4.inverse_trs(
-            self._translation, self._rotation, self._scale,
-            self._shear, self._pivot, self._rotation_order,
-        )
+        if self._matrix_mode:
+            self._matrix = self._coerce_matrix(matrix)
+            self._inverse_matrix = (
+                self._coerce_matrix(inverse_matrix)
+                if inverse_matrix is not None
+                else self._matrix.inverse()
+            )
+        else:
+            self._matrix = Mat4x4.from_trs(
+                self._translation, self._rotation, self._scale,
+                self._shear, self._pivot, self._rotation_order,
+            )
+            self._inverse_matrix = Mat4x4.inverse_trs(
+                self._translation, self._rotation, self._scale,
+                self._shear, self._pivot, self._rotation_order,
+            )
         self.dirty = False  # Tracks whether matrices need to be rebuilt.
 
-        if not shape:
+        self._update_world_aabb()
+
+    @staticmethod
+    def _coerce_matrix(value):
+        if isinstance(value, Mat4x4):
+            rows = value.rows
+        else:
+            rows = value
+        if len(rows) != 4 or any(len(row) != 4 for row in rows):
+            raise ValueError("Matrix transforms must be 4x4")
+        return Mat4x4([[float(v) for v in row] for row in rows])
+
+    def _update_world_aabb(self):
+        if not self._shape:
             # Default to a unit cube; replaced when a shape is assigned.
             self._world_aabb = AABB(Vec3(-0.5, -0.5, -0.5), Vec3(0.5, 0.5, 0.5))
-        elif shape.is_infinite:
+        elif self._shape.is_infinite:
             # Infinite shapes have no bounds; use an empty AABB or skip intersection tests.
             self._world_aabb = AABB(Vec3(0, 0, 0), Vec3(0, 0, 0))
         else:
-            self._world_aabb = shape.local_bounds().transform(self._matrix)
-
-    def _rebuild(self):
-        self._matrix = Mat4x4.from_trs(
-            self._translation, self._rotation, self._scale,
-            self._shear, self._pivot, self._rotation_order,
-        )
-        self._inverse_matrix = Mat4x4.inverse_trs(
-            self._translation, self._rotation, self._scale,
-            self._shear, self._pivot, self._rotation_order,
-        )
-        if self._shape and not self._shape.is_infinite:
             self._world_aabb = self._shape.local_bounds().transform(self._matrix)
 
+    def _rebuild(self):
+        if not self._matrix_mode:
+            self._matrix = Mat4x4.from_trs(
+                self._translation, self._rotation, self._scale,
+                self._shear, self._pivot, self._rotation_order,
+            )
+            self._inverse_matrix = Mat4x4.inverse_trs(
+                self._translation, self._rotation, self._scale,
+                self._shear, self._pivot, self._rotation_order,
+            )
+        self._update_world_aabb()
         self.dirty = False
+
+    def _mark_components_dirty(self):
+        self._matrix_mode = False
+        self.dirty = True
 
     # ─── Properties ───────────────────────────────────────────────────────────
 
@@ -76,7 +103,7 @@ class Transform:
     @translation.setter
     def translation(self, value):
         self._translation = value
-        self.dirty = True
+        self._mark_components_dirty()
 
     @property
     def rotation(self):
@@ -85,7 +112,7 @@ class Transform:
     @rotation.setter
     def rotation(self, value):
         self._rotation = value
-        self.dirty = True
+        self._mark_components_dirty()
 
     @property
     def scale(self):
@@ -94,7 +121,7 @@ class Transform:
     @scale.setter
     def scale(self, value):
         self._scale = value
-        self.dirty = True
+        self._mark_components_dirty()
 
     @property
     def shear(self):
@@ -103,7 +130,7 @@ class Transform:
     @shear.setter
     def shear(self, value):
         self._shear = value
-        self.dirty = True
+        self._mark_components_dirty()
 
     @property
     def pivot(self):
@@ -112,7 +139,7 @@ class Transform:
     @pivot.setter
     def pivot(self, value):
         self._pivot = value
-        self.dirty = True
+        self._mark_components_dirty()
 
     @property
     def rotation_order(self):
@@ -121,7 +148,7 @@ class Transform:
     @rotation_order.setter
     def rotation_order(self, value):
         self._rotation_order = value
-        self.dirty = True
+        self._mark_components_dirty()
 
     @property
     def shape(self):
@@ -130,7 +157,36 @@ class Transform:
     @shape.setter
     def shape(self, value):
         self._shape = value
-        self.dirty = True
+        if self._matrix_mode:
+            self._update_world_aabb()
+            self.dirty = False
+        else:
+            self.dirty = True
+
+    @property
+    def matrix_mode(self):
+        return self._matrix_mode
+
+    @property
+    def matrix(self):
+        if self.dirty:
+            self._rebuild()
+        return self._matrix
+
+    @matrix.setter
+    def matrix(self, value):
+        self.set_matrix(value)
+
+    def set_matrix(self, matrix, inverse_matrix=None):
+        self._matrix = self._coerce_matrix(matrix)
+        self._inverse_matrix = (
+            self._coerce_matrix(inverse_matrix)
+            if inverse_matrix is not None
+            else self._matrix.inverse()
+        )
+        self._matrix_mode = True
+        self._update_world_aabb()
+        self.dirty = False
 
     # ─── Computed outputs (trigger rebuild if dirty) ───────────────────────────
 
@@ -157,7 +213,8 @@ class Transform:
                 f"s={self._scale}, order={self._rotation_order})")
 
     def to_dict(self):
-        return {
+        data = {
+            "mode": "matrix" if self._matrix_mode else "components",
             "translation": self._translation.to_dict(),
             "rotation": self._rotation.to_dict(),
             "scale": self._scale.to_dict(),
@@ -165,9 +222,25 @@ class Transform:
             "pivot": self._pivot.to_dict(),
             "rotation_order": self._rotation_order.value,  # enum to int
         }
+        if self._matrix_mode:
+            data["matrix"] = [row[:] for row in self._matrix.rows]
+            data["inverse_matrix"] = [row[:] for row in self._inverse_matrix.rows]
+        return data
 
     @classmethod
     def from_dict(cls, data, shape=None):
+        if data.get("mode") == "matrix" or "matrix" in data:
+            return cls(
+                matrix=data["matrix"],
+                inverse_matrix=data.get("inverse_matrix"),
+                translation=Vec3.from_dict(data.get("translation", [0, 0, 0])),
+                rotation=Vec3.from_dict(data.get("rotation", [0, 0, 0])),
+                scale=Vec3.from_dict(data.get("scale", [1, 1, 1])),
+                shear=Vec3.from_dict(data.get("shear", [0, 0, 0])),
+                pivot=Vec3.from_dict(data.get("pivot", [0, 0, 0])),
+                rotation_order=RotationOrder(data.get("rotation_order", RotationOrder.XYZ.value)),
+                shape=shape,
+            )
         return cls(
             translation=Vec3.from_dict(data["translation"]),
             rotation=Vec3.from_dict(data["rotation"]),
