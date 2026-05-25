@@ -1,10 +1,13 @@
 import numpy as np
 
-from core import Color, Vec3
+from core import Color, Mat4x4, Vec3
 from rendering.gl_viewport import (
     ViewportCamera,
+    _apply_world_translation,
     _build_gizmo_vertices,
     build_scene_viewport_buffers,
+    move_gizmo_drag_delta,
+    pick_move_gizmo_axis,
     pick_scene_object,
 )
 from scene import Diffuse, IndexedMesh, SceneObject, Shape, World
@@ -38,6 +41,18 @@ def test_viewport_camera_screen_center_ray_points_forward():
     ray = camera.screen_ray(400, 300, 800, 600)
 
     assert vec3_approx_eq(ray.direction, Vec3(0, 0, -1))
+
+
+def test_viewport_camera_projects_world_axes_to_screen():
+    camera = ViewportCamera(target=(0, 0, 0), distance=10, yaw=0, pitch=0)
+
+    center = camera.project_point((0, 0, 0), 800, 600)
+    x_axis = camera.project_point((1, 0, 0), 800, 600)
+    y_axis = camera.project_point((0, 1, 0), 800, 600)
+
+    assert np.allclose(center[:2], np.array([400, 300], dtype=np.float32))
+    assert x_axis[0] > center[0]
+    assert y_axis[1] < center[1]
 
 
 def test_viewport_camera_frame_bounds_centers_camera_on_scene():
@@ -123,6 +138,57 @@ def test_pick_scene_object_skips_non_selectable_objects():
     assert result is None
 
 
+def test_pick_move_gizmo_axis_hits_projected_axis_line():
+    world = _single_triangle_world()
+    obj = world.objects[0]
+    camera = ViewportCamera(target=(0, 0, 0), distance=10, yaw=0, pitch=0)
+    origin = camera.project_point((0.5, 0.5, 0), 800, 600)[:2]
+    x_end = camera.project_point((1.0, 0.5, 0), 800, 600)[:2]
+    midpoint = (origin + x_end) * 0.5
+
+    result = pick_move_gizmo_axis(obj, camera, midpoint[0], midpoint[1], 800, 600)
+
+    assert result is not None
+    assert result[0] == "x"
+
+
+def test_move_gizmo_drag_delta_tracks_screen_projected_axis():
+    camera = ViewportCamera(target=(0, 0, 0), distance=10, yaw=0, pitch=0)
+    origin = np.array([0, 0, 0], dtype=np.float32)
+    axis = np.array([1, 0, 0], dtype=np.float32)
+    start = camera.project_point(origin, 800, 600)[:2]
+    end = camera.project_point(origin + axis, 800, 600)[:2]
+
+    delta = move_gizmo_drag_delta(camera, origin, axis, 1.0, start, end, 800, 600)
+
+    assert np.allclose(delta, np.array([1, 0, 0], dtype=np.float32), atol=1e-5)
+
+
+def test_apply_world_translation_updates_component_transform():
+    obj = SceneObject(translation=Vec3(1, 2, 3))
+
+    _apply_world_translation(
+        obj,
+        np.array([2, 0, 0], dtype=np.float32),
+        start_translation=obj.translation,
+    )
+
+    assert vec3_approx_eq(obj.translation, Vec3(3, 2, 3))
+
+
+def test_apply_world_translation_updates_matrix_transform():
+    obj = SceneObject(matrix=Mat4x4.identity())
+
+    _apply_world_translation(
+        obj,
+        np.array([2, 0, 0], dtype=np.float32),
+        start_matrix=obj.local_matrix,
+    )
+
+    moved = obj.local_matrix.transform_point(Vec3(0, 0, 0))
+    assert vec3_approx_eq(moved, Vec3(2, 0, 0))
+
+
 def test_build_gizmo_vertices_returns_mode_specific_line_vertices():
     origin = np.array([0, 0, 0], dtype=np.float32)
 
@@ -181,10 +247,15 @@ if __name__ == "__main__":
         test_viewport_camera_orbit_changes_eye_but_keeps_target_and_distance,
         test_viewport_camera_pan_moves_target_in_view_plane,
         test_viewport_camera_screen_center_ray_points_forward,
+        test_viewport_camera_projects_world_axes_to_screen,
         test_viewport_camera_frame_bounds_centers_camera_on_scene,
         test_scene_viewport_buffers_extract_indexed_mesh_vertices_and_color,
         test_scene_viewport_buffers_resolve_group_materials_per_triangle,
         test_pick_scene_object_returns_nearest_object_under_cursor,
         test_pick_scene_object_skips_non_selectable_objects,
+        test_pick_move_gizmo_axis_hits_projected_axis_line,
+        test_move_gizmo_drag_delta_tracks_screen_projected_axis,
+        test_apply_world_translation_updates_component_transform,
+        test_apply_world_translation_updates_matrix_transform,
         test_build_gizmo_vertices_returns_mode_specific_line_vertices,
     ])
