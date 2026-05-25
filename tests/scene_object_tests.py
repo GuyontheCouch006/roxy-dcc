@@ -8,7 +8,7 @@
 
 from scene import Sphere, Diffuse, SceneObject
 from scene.materials import Glossy
-from core import Vec3, Ray, Color, RotationOrder
+from core import Mat4x4, Vec3, Ray, Color, RotationOrder
 from tests.utils import run_tests, approx_eq, vec3_approx_eq
 
 
@@ -50,6 +50,19 @@ def test_default_scale_is_one():
 def test_default_rotation_is_zero():
     obj = _sphere_obj()
     assert vec3_approx_eq(obj.rotation, Vec3(0, 0, 0))
+
+def test_constructor_accepts_local_matrix():
+    obj = _sphere_obj(matrix=Mat4x4.translation(5, 0, 0))
+
+    assert obj.matrix_mode
+    assert vec3_approx_eq(obj.local_matrix.transform_point(Vec3(0, 0, 0)), Vec3(5, 0, 0))
+
+def test_parent_world_matrix_composes_child_local_matrix():
+    parent = SceneObject(name="parent", matrix=Mat4x4.translation(10, 0, 0))
+    child = _sphere_obj(matrix=Mat4x4.translation(1, 0, 0))
+    parent.add_child(child)
+
+    assert vec3_approx_eq(child.world_matrix.transform_point(Vec3(0, 0, 0)), Vec3(11, 0, 0))
 
 
 # ─── Property setters ─────────────────────────────────────────────────────────
@@ -222,6 +235,17 @@ def test_scene_graph_round_trips_children_and_shapes():
     assert isinstance(restored.children[0].shape, Sphere)
     assert vec3_approx_eq(restored.children[0].translation, Vec3(1, 2, 3))
 
+def test_scene_graph_round_trips_matrix_transform():
+    root = SceneObject(name="root")
+    child = _sphere_obj(name="child", matrix=Mat4x4.translation(1, 2, 3))
+    root.add_child(child)
+
+    restored = SceneObject.from_dict(root.to_dict())
+
+    restored_child = restored.children[0]
+    assert restored_child.matrix_mode
+    assert vec3_approx_eq(restored_child.local_matrix.transform_point(Vec3(0, 0, 0)), Vec3(1, 2, 3))
+
 
 # ─── Repr ─────────────────────────────────────────────────────────────────────
 
@@ -243,6 +267,8 @@ if __name__ == "__main__":
         test_default_translation_is_zero,
         test_default_scale_is_one,
         test_default_rotation_is_zero,
+        test_constructor_accepts_local_matrix,
+        test_parent_world_matrix_composes_child_local_matrix,
         test_name_setter,
         test_visible_setter,
         test_renderable_setter,
@@ -266,6 +292,7 @@ if __name__ == "__main__":
         test_taichi_export_uses_parent_world_transform_for_primitives,
         test_taichi_export_preserves_glossy_roughness_for_primitives,
         test_scene_graph_round_trips_children_and_shapes,
+        test_scene_graph_round_trips_matrix_transform,
         test_repr_contains_name,
         test_repr_contains_scene_object,
     ]
