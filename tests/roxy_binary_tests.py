@@ -5,6 +5,7 @@ import numpy as np
 
 from scene.io.roxy_binary import (
     list_rxb_meshes,
+    load_rxb_metadata,
     load_rxb_mesh,
     load_rxb_mesh_ref,
     save_rxb_meshes,
@@ -111,9 +112,56 @@ def test_load_rxb_mesh_ref_resolves_relative_path():
             pass
 
 
+def test_shared_vertex_buffers_are_saved_once_and_reused_on_load():
+    path = _temp_path(".rxb")
+    positions = np.asarray(
+        [
+            [0, 0, 0],
+            [1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+        ],
+        dtype=np.float64,
+    )
+    mesh_a = IndexedMesh(
+        positions,
+        [[0, 1, 2]],
+        groups=["default"],
+        tri_group_idx=[0],
+        build_bvh=False,
+    )
+    mesh_b = IndexedMesh(
+        positions,
+        [[0, 2, 3]],
+        groups=["default"],
+        tri_group_idx=[0],
+        build_bvh=False,
+    )
+    try:
+        save_rxb_meshes(path, {"meshA": mesh_a, "meshB": mesh_b})
+        metadata = load_rxb_metadata(path)
+        position_buffers = [
+            buffer for buffer in metadata["buffers"].values()
+            if buffer["kind"] == "positions"
+        ]
+        cache = {}
+
+        restored_a = load_rxb_mesh(path, "meshA", cache=cache)
+        restored_b = load_rxb_mesh(path, "meshB", cache=cache)
+
+        assert len(position_buffers) == 1
+        assert np.shares_memory(restored_a._positions, restored_b._positions)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 if __name__ == "__main__":
     run_tests([
         test_save_and_load_rxb_indexed_mesh_payload,
         test_list_rxb_meshes_returns_payload_names,
         test_load_rxb_mesh_ref_resolves_relative_path,
+        test_shared_vertex_buffers_are_saved_once_and_reused_on_load,
     ])

@@ -1,6 +1,8 @@
 import os
 import tempfile
 
+import numpy as np
+
 from core import Color, Mat4x4, Vec3
 from scene import Camera, Glossy, SceneObject, Sphere, World
 from scene.io import load_scene, save_scene
@@ -157,6 +159,51 @@ def test_rxb_mesh_reference_imports_binary_payload():
             pass
 
 
+def test_rxa_loader_reuses_shared_rxb_buffers_across_shape_refs():
+    rxb_path = tempfile.NamedTemporaryFile(suffix=".rxb", delete=False).name
+    try:
+        positions = np.asarray(
+            [[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]],
+            dtype=np.float64,
+        )
+        mesh_a = IndexedMesh(
+            positions,
+            [[0, 1, 2]],
+            groups=["default"],
+            tri_group_idx=[0],
+            build_bvh=False,
+        )
+        mesh_b = IndexedMesh(
+            positions,
+            [[0, 2, 3]],
+            groups=["default"],
+            tri_group_idx=[0],
+            build_bvh=False,
+        )
+        save_rxb_meshes(rxb_path, {"triA": mesh_a, "triB": mesh_b})
+        scene = parse_rxa(f"""
+            createNode transform -n "assetA";
+            setAttr "assetA.matrix" -type matrix {_identity_values()};
+            createNode meshShape -n "assetAShape" -p "assetA";
+            setAttr "assetAShape.geometry" -type rxbMesh "{os.path.basename(rxb_path)}:meshes/triA";
+            createNode transform -n "assetB";
+            setAttr "assetB.matrix" -type matrix {_identity_values()};
+            createNode meshShape -n "assetBShape" -p "assetB";
+            setAttr "assetBShape.geometry" -type rxbMesh "{os.path.basename(rxb_path)}:meshes/triB";
+        """)
+
+        world = rxa_scene_to_world(scene, base_dir=os.path.dirname(rxb_path))
+
+        mesh_a = world.objects[0].shape
+        mesh_b = world.objects[1].shape
+        assert np.shares_memory(mesh_a._positions, mesh_b._positions)
+    finally:
+        try:
+            os.unlink(rxb_path)
+        except OSError:
+            pass
+
+
 def test_save_obj_as_roxy_writes_rxa_and_rxb_pair():
     obj_path = _write_obj("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
     rxa_path = tempfile.NamedTemporaryFile(suffix=".rxa", delete=False).name
@@ -186,5 +233,6 @@ if __name__ == "__main__":
         test_load_save_scene_dispatches_rxa_extension,
         test_obj_reference_rxa_scene_imports_external_obj_hierarchy,
         test_rxb_mesh_reference_imports_binary_payload,
+        test_rxa_loader_reuses_shared_rxb_buffers_across_shape_refs,
         test_save_obj_as_roxy_writes_rxa_and_rxb_pair,
     ])
