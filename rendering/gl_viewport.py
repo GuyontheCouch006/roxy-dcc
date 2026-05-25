@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 
-from core import AABB, Vec3
+from core import AABB, Ray, Vec3
 from scene.mesh import IndexedMesh, Mesh, Triangle
 
 try:
@@ -125,6 +125,22 @@ QUAD_VERTICES = np.array([
 
 
 @dataclass
+class ObjectVertexSpan:
+    scene_object: object
+    start: int
+    count: int
+    bounds: AABB | None
+
+
+@dataclass
+class PickResult:
+    scene_object: object
+    shape: object
+    t: float
+    point: Vec3
+
+
+@dataclass
 class SceneViewportBuffers:
     vertices: np.ndarray
     normals: np.ndarray
@@ -132,6 +148,7 @@ class SceneViewportBuffers:
     bounds: AABB | None
     triangle_count: int
     shape_count: int
+    object_spans: tuple = ()
 
     @property
     def vertex_count(self):
@@ -140,6 +157,12 @@ class SceneViewportBuffers:
     @property
     def is_empty(self):
         return self.vertex_count == 0
+
+    def span_for(self, scene_object):
+        for span in self.object_spans:
+            if span.scene_object is scene_object:
+                return span
+        return None
 
 
 class ViewportCamera:
@@ -254,19 +277,39 @@ class ViewportCamera:
         camera.up = Vec3(float(up[0]), float(up[1]), float(up[2]))
         camera.fov = self.fov
 
+    def screen_ray(self, x, y, width, height):
+        aspect = width / height if height else 1.0
+        half_fov = math.tan(math.radians(self.fov) * 0.5)
+        ndc_x = ((float(x) / float(width)) * 2.0 - 1.0) * aspect * half_fov
+        ndc_y = (1.0 - (float(y) / float(height)) * 2.0) * half_fov
+        origin = self.eye
+        direction = self.forward + self.right * ndc_x + self.up * ndc_y
+        return Ray(
+            Vec3(float(origin[0]), float(origin[1]), float(origin[2])),
+            Vec3(float(direction[0]), float(direction[1]), float(direction[2])),
+        )
+
 
 def build_scene_viewport_buffers(world, default_color=(0.62, 0.66, 0.70)):
     """Flatten renderable world geometry into GPU-friendly viewport arrays."""
     vertices = []
     normals = []
     colors = []
+    object_spans = []
     bounds = None
     triangle_count = 0
     shape_count = 0
+    vertex_cursor = 0
 
     for obj in _walk_objects(world.objects):
         if not getattr(obj, "visible", True):
             continue
+
+        obj_vertices = []
+        obj_normals = []
+        obj_colors = []
+        obj_bounds = None
+
         for shape in obj.shapes:
             geometry = shape.geometry
             extracted = _extract_shape_arrays(obj, shape, default_color)
@@ -277,9 +320,9 @@ def build_scene_viewport_buffers(world, default_color=(0.62, 0.66, 0.70)):
             if len(shape_vertices) == 0:
                 continue
 
-            vertices.append(shape_vertices)
-            normals.append(shape_normals)
-            colors.append(shape_colors)
+            obj_vertices.append(shape_vertices)
+            obj_normals.append(shape_normals)
+            obj_colors.append(shape_colors)
             triangle_count += len(shape_vertices) // 3
             shape_count += 1
 
@@ -287,6 +330,25 @@ def build_scene_viewport_buffers(world, default_color=(0.62, 0.66, 0.70)):
             if local_bounds is not None:
                 world_bounds = local_bounds.transform(obj.world_matrix)
                 bounds = world_bounds if bounds is None else bounds.union(world_bounds)
+                obj_bounds = world_bounds if obj_bounds is None else obj_bounds.union(world_bounds)
+
+        if obj_vertices:
+            combined_vertices = np.concatenate(obj_vertices, axis=0).astype(np.float32, copy=False)
+            combined_normals = np.concatenate(obj_normals, axis=0).astype(np.float32, copy=False)
+            combined_colors = np.concatenate(obj_colors, axis=0).astype(np.float32, copy=False)
+
+            vertices.append(combined_vertices)
+            normals.append(combined_normals)
+            colors.append(combined_colors)
+            object_spans.append(
+                ObjectVertexSpan(
+                    scene_object=obj,
+                    start=vertex_cursor,
+                    count=len(combined_vertices),
+                    bounds=obj_bounds,
+                )
+            )
+            vertex_cursor += len(combined_vertices)
 
     if not vertices:
         empty_vec3 = np.zeros((0, 3), dtype=np.float32)
@@ -299,6 +361,7 @@ def build_scene_viewport_buffers(world, default_color=(0.62, 0.66, 0.70)):
         bounds,
         triangle_count,
         shape_count,
+        tuple(object_spans),
     )
 
 
@@ -320,12 +383,22 @@ class GLViewport:
         self._scene_buffers = None
         self._scene_vbo = None
         self._scene_vao = None
+        self._selection_vbo = None
+        self._selection_vao = None
+        self._selection_vertex_count = 0
         self._grid_vbo = None
         self._grid_vao = None
         self._grid_vertex_count = 0
+        self._gizmo_vbo = None
+        self._gizmo_vao = None
+        self._gizmo_vertex_count = 0
         self._drag_button = None
+        self._mouse_down_pos = None
+        self._mouse_dragged = False
         self._wireframe = False
         self._render_requested = False
+        self._selected_object = None
+        self._gizmo_mode = "move"
         self._camera = ViewportCamera()
 
         pygame.init()
@@ -376,6 +449,14 @@ class GLViewport:
     def render_requested(self):
         return self._render_requested
 
+    @property
+    def selected_object(self):
+        return self._selected_object
+
+    @property
+    def gizmo_mode(self):
+        return self._gizmo_mode
+
     def consume_render_requested(self):
         requested = self._render_requested
         self._render_requested = False
@@ -388,7 +469,37 @@ class GLViewport:
         if frame and self._scene_buffers.bounds is not None:
             self._camera.frame_bounds(self._scene_buffers.bounds)
             self._sync_world_camera()
+        self.set_selected_object(None)
         self._mode = "scene"
+
+    def set_selected_object(self, scene_object):
+        if scene_object is self._selected_object:
+            return
+        self._selected_object = scene_object
+        self._upload_selection_buffers()
+        self._upload_gizmo_buffers()
+
+    def set_gizmo_mode(self, mode):
+        if mode not in ("move", "rotate", "scale"):
+            raise ValueError("gizmo mode must be 'move', 'rotate', or 'scale'")
+        if mode == self._gizmo_mode:
+            return
+        self._gizmo_mode = mode
+        self._upload_gizmo_buffers()
+
+    def pick_object(self, screen_x, screen_y):
+        if self._world is None:
+            return None
+        result = pick_scene_object(
+            self._world,
+            self._camera,
+            screen_x,
+            screen_y,
+            self._width,
+            self._height,
+        )
+        self.set_selected_object(result.scene_object if result else None)
+        return result
 
     def poll_events(self):
         for event in pygame.event.get():
@@ -401,6 +512,8 @@ class GLViewport:
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button in (1, 2, 3):
                     self._drag_button = event.button
+                    self._mouse_down_pos = event.pos
+                    self._mouse_dragged = False
                 elif event.button == 4:
                     self._camera.dolly(-120)
                     self._sync_world_camera()
@@ -409,11 +522,19 @@ class GLViewport:
                     self._sync_world_camera()
             elif event.type == pygame.MOUSEBUTTONUP:
                 if event.button == self._drag_button:
+                    if event.button == 1 and not self._mouse_dragged and self._mode == "scene":
+                        self.pick_object(*event.pos)
                     self._drag_button = None
+                    self._mouse_down_pos = None
             elif event.type == pygame.MOUSEWHEEL:
                 self._camera.dolly(-event.y * 120)
                 self._sync_world_camera()
             elif event.type == pygame.MOUSEMOTION and self._mode == "scene":
+                if self._mouse_down_pos is not None:
+                    dx = event.pos[0] - self._mouse_down_pos[0]
+                    dy = event.pos[1] - self._mouse_down_pos[1]
+                    if dx * dx + dy * dy > 16:
+                        self._mouse_dragged = True
                 self._handle_mouse_drag(event.rel)
 
     def update(self, image):
@@ -445,6 +566,18 @@ class GLViewport:
             self._scene_vao.render(moderngl.TRIANGLES, vertices=self._scene_buffers.vertex_count)
             self._ctx.wireframe = False
 
+        if self._selection_vao is not None:
+            self._ctx.disable(moderngl.DEPTH_TEST)
+            self._ctx.wireframe = True
+            self._selection_vao.render(moderngl.TRIANGLES, vertices=self._selection_vertex_count)
+            self._ctx.wireframe = False
+            self._ctx.enable(moderngl.DEPTH_TEST)
+
+        if self._gizmo_vao is not None:
+            self._ctx.disable(moderngl.DEPTH_TEST)
+            self._gizmo_vao.render(moderngl.LINES, vertices=self._gizmo_vertex_count)
+            self._ctx.enable(moderngl.DEPTH_TEST)
+
         pygame.display.flip()
 
     def refresh(self):
@@ -460,9 +593,13 @@ class GLViewport:
             self._scene_vao,
             self._scene_vbo,
             self._scene_program,
+            self._selection_vao,
+            self._selection_vbo,
             self._grid_vao,
             self._grid_vbo,
             self._grid_program,
+            self._gizmo_vao,
+            self._gizmo_vbo,
         ):
             if resource is not None:
                 resource.release()
@@ -532,6 +669,71 @@ class GLViewport:
             [(self._scene_vbo, "3f 3f 3f", "in_position", "in_normal", "in_color")],
         )
 
+    def _upload_selection_buffers(self):
+        if self._selection_vao is not None:
+            self._selection_vao.release()
+            self._selection_vao = None
+        if self._selection_vbo is not None:
+            self._selection_vbo.release()
+            self._selection_vbo = None
+        self._selection_vertex_count = 0
+
+        if (
+            self._scene_buffers is None
+            or self._selected_object is None
+            or self._scene_buffers.is_empty
+        ):
+            return
+
+        span = self._scene_buffers.span_for(self._selected_object)
+        if span is None or span.count <= 0:
+            return
+
+        start = span.start
+        end = start + span.count
+        vertices = self._scene_buffers.vertices[start:end]
+        normals = self._scene_buffers.normals[start:end]
+        colors = np.repeat(
+            np.asarray([[1.0, 0.63, 0.12]], dtype=np.float32),
+            span.count,
+            axis=0,
+        )
+        interleaved = np.concatenate([vertices, normals, colors], axis=1).astype(
+            np.float32,
+            copy=False,
+        )
+        self._selection_vertex_count = span.count
+        self._selection_vbo = self._ctx.buffer(interleaved.tobytes())
+        self._selection_vao = self._ctx.vertex_array(
+            self._scene_program,
+            [(self._selection_vbo, "3f 3f 3f", "in_position", "in_normal", "in_color")],
+        )
+
+    def _upload_gizmo_buffers(self):
+        if self._gizmo_vao is not None:
+            self._gizmo_vao.release()
+            self._gizmo_vao = None
+        if self._gizmo_vbo is not None:
+            self._gizmo_vbo.release()
+            self._gizmo_vbo = None
+        self._gizmo_vertex_count = 0
+
+        if self._selected_object is None:
+            return
+
+        origin = _object_gizmo_origin(self._selected_object)
+        size = _object_gizmo_size(self._selected_object)
+        vertices = _build_gizmo_vertices(origin, size, self._gizmo_mode)
+        if len(vertices) == 0:
+            return
+
+        self._gizmo_vertex_count = len(vertices)
+        self._gizmo_vbo = self._ctx.buffer(vertices.tobytes())
+        self._gizmo_vao = self._ctx.vertex_array(
+            self._grid_program,
+            [(self._gizmo_vbo, "3f 3f", "in_position", "in_color")],
+        )
+
     def _draw_image(self):
         self._ctx.disable(moderngl.DEPTH_TEST)
         self._ctx.clear(0.0, 0.0, 0.0)
@@ -559,9 +761,19 @@ class GLViewport:
         if key == pygame.K_ESCAPE:
             self._should_close = True
         elif key == pygame.K_f and self._scene_buffers is not None:
-            self._camera.frame_bounds(self._scene_buffers.bounds)
+            if self._selected_object is not None:
+                span = self._scene_buffers.span_for(self._selected_object)
+                self._camera.frame_bounds(span.bounds if span else self._scene_buffers.bounds)
+            else:
+                self._camera.frame_bounds(self._scene_buffers.bounds)
             self._sync_world_camera()
         elif key == pygame.K_w:
+            self.set_gizmo_mode("move")
+        elif key == pygame.K_e:
+            self.set_gizmo_mode("rotate")
+        elif key == pygame.K_r:
+            self.set_gizmo_mode("scale")
+        elif key == pygame.K_4:
             self._wireframe = not self._wireframe
         elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             self._render_requested = True
@@ -590,6 +802,52 @@ class GLViewport:
 
     def __repr__(self):
         return f"GLViewport({self._width}x{self._height}, mode={self._mode!r})"
+
+
+def pick_scene_object(world, viewport_camera, screen_x, screen_y, width, height):
+    """Pick the nearest selectable scene object under a viewport pixel."""
+    ray = viewport_camera.screen_ray(screen_x, screen_y, width, height)
+    closest = None
+
+    for obj in _walk_objects(world.objects):
+        if not getattr(obj, "visible", True) or not getattr(obj, "selectable", True):
+            continue
+        result = _pick_object_shapes(obj, ray)
+        if result is not None and (closest is None or result.t < closest.t):
+            closest = result
+
+    return closest
+
+
+def _pick_object_shapes(obj, world_ray):
+    if not obj.shapes:
+        return None
+
+    if getattr(obj, "_can_use_aabb_early_out", None) and obj._can_use_aabb_early_out():
+        if obj.world_aabb.intersect(world_ray) is None:
+            return None
+
+    inv = obj.world_inverse_matrix
+    local_origin = inv.transform_point(world_ray.origin)
+    local_direction = inv.transform_vector(world_ray.direction)
+    local_ray = Ray(local_origin, local_direction)
+    closest = None
+
+    for shape in obj.shapes:
+        hit = shape.intersect(local_ray)
+        if hit is None:
+            continue
+
+        world_point = obj.world_matrix.transform_point(hit.point)
+        world_t = (world_point - world_ray.origin).dot(world_ray.direction)
+        if world_t <= 0.001:
+            continue
+
+        result = PickResult(obj, shape, world_t, world_point)
+        if closest is None or result.t < closest.t:
+            closest = result
+
+    return closest
 
 
 def _extract_shape_arrays(obj, shape, default_color):
@@ -714,6 +972,106 @@ def _walk_objects(objects):
         yield obj
         for child in obj.children:
             yield from _walk_objects([child])
+
+
+def _object_gizmo_origin(scene_object):
+    try:
+        bounds = scene_object.world_aabb
+    except Exception:
+        bounds = None
+    if bounds is not None:
+        return _vec3_to_np((bounds.min + bounds.max) * 0.5)
+    return _vec3_to_np(scene_object.world_matrix.transform_point(Vec3(0, 0, 0)))
+
+
+def _object_gizmo_size(scene_object):
+    try:
+        bounds = scene_object.world_aabb
+    except Exception:
+        bounds = None
+    if bounds is None:
+        return 1.0
+    extent = _vec3_to_np(bounds.max - bounds.min)
+    radius = float(np.linalg.norm(extent) * 0.5)
+    return max(min(radius * 0.65, 10.0), 0.5)
+
+
+def _build_gizmo_vertices(origin, size, mode):
+    origin = _as_np3(origin)
+    size = float(size)
+    lines = []
+    x_axis = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    y_axis = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+    z_axis = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    axes = (
+        (x_axis, np.array([1.0, 0.18, 0.16], dtype=np.float32)),
+        (y_axis, np.array([0.22, 0.86, 0.28], dtype=np.float32)),
+        (z_axis, np.array([0.22, 0.42, 1.0], dtype=np.float32)),
+    )
+
+    if mode == "move":
+        for axis, color in axes:
+            end = origin + axis * size
+            _append_line(lines, origin, end, color)
+            _append_arrowhead(lines, end, axis, color, size * 0.14)
+    elif mode == "scale":
+        for axis, color in axes:
+            end = origin + axis * size
+            _append_line(lines, origin, end, color)
+            _append_scale_handle(lines, end, axis, color, size * 0.11)
+    elif mode == "rotate":
+        _append_ring(lines, origin, x_axis, np.array([1.0, 0.18, 0.16], dtype=np.float32), size)
+        _append_ring(lines, origin, y_axis, np.array([0.22, 0.86, 0.28], dtype=np.float32), size)
+        _append_ring(lines, origin, z_axis, np.array([0.22, 0.42, 1.0], dtype=np.float32), size)
+    else:
+        raise ValueError("gizmo mode must be 'move', 'rotate', or 'scale'")
+
+    return np.asarray(lines, dtype=np.float32).reshape((-1, 6))
+
+
+def _append_line(lines, p0, p1, color):
+    lines.append([*p0, *color])
+    lines.append([*p1, *color])
+
+
+def _append_arrowhead(lines, end, axis, color, size):
+    basis_a, basis_b = _axis_perpendiculars(axis)
+    back = end - axis * size
+    for side in (basis_a, -basis_a, basis_b, -basis_b):
+        _append_line(lines, end, back + side * size * 0.45, color)
+
+
+def _append_scale_handle(lines, end, axis, color, size):
+    basis_a, basis_b = _axis_perpendiculars(axis)
+    corners = [
+        end + basis_a * size + basis_b * size,
+        end - basis_a * size + basis_b * size,
+        end - basis_a * size - basis_b * size,
+        end + basis_a * size - basis_b * size,
+    ]
+    for i in range(4):
+        _append_line(lines, corners[i], corners[(i + 1) % 4], color)
+    _append_line(lines, end, end + axis * size * 0.65, color)
+
+
+def _append_ring(lines, origin, normal, color, radius, segments=64):
+    basis_a, basis_b = _axis_perpendiculars(normal)
+    points = []
+    for i in range(segments):
+        angle = (i / segments) * math.tau
+        points.append(origin + (basis_a * math.cos(angle) + basis_b * math.sin(angle)) * radius)
+    for i in range(segments):
+        _append_line(lines, points[i], points[(i + 1) % segments], color)
+
+
+def _axis_perpendiculars(axis):
+    axis = _normalize(axis)
+    helper = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+    if abs(float(np.dot(axis, helper))) > 0.95:
+        helper = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+    basis_a = _normalize(np.cross(axis, helper))
+    basis_b = _normalize(np.cross(axis, basis_a))
+    return basis_a, basis_b
 
 
 def _build_grid_vertices(size=10.0, divisions=20):
