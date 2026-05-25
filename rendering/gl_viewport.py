@@ -11,7 +11,7 @@ import math
 
 import numpy as np
 
-from core import AABB, Ray, Vec3
+from core import AABB, Mat4x4, Ray, Vec3
 from scene.mesh import IndexedMesh, Mesh, Triangle
 
 try:
@@ -138,6 +138,18 @@ class PickResult:
     shape: object
     t: float
     point: Vec3
+
+
+@dataclass
+class MoveGizmoDrag:
+    scene_object: object
+    axis_name: str
+    axis: np.ndarray
+    origin: np.ndarray
+    size: float
+    start_mouse: np.ndarray
+    start_translation: Vec3
+    start_matrix: Mat4x4 | None
 
 
 @dataclass
@@ -268,6 +280,22 @@ class ViewportCamera:
             [0.0, 0.0, -1.0, 0.0],
         ], dtype=np.float32)
 
+    def project_point(self, point, width, height):
+        width = max(float(width), 1.0)
+        height = max(float(height), 1.0)
+        point = _as_np3(point)
+        p = np.array([point[0], point[1], point[2], 1.0], dtype=np.float32)
+        view_point = self.view_matrix() @ p
+        clip = self.projection_matrix(width / height) @ view_point
+        if abs(float(clip[3])) <= 1e-8:
+            return None
+        ndc = clip[:3] / clip[3]
+        return np.array([
+            (float(ndc[0]) + 1.0) * 0.5 * width,
+            (1.0 - float(ndc[1])) * 0.5 * height,
+            float(ndc[2]),
+        ], dtype=np.float32)
+
     def apply_to_camera(self, camera):
         eye = self.eye
         camera.position = Vec3(float(eye[0]), float(eye[1]), float(eye[2]))
@@ -395,6 +423,7 @@ class GLViewport:
         self._drag_button = None
         self._mouse_down_pos = None
         self._mouse_dragged = False
+        self._move_drag = None
         self._wireframe = False
         self._render_requested = False
         self._selected_object = None
@@ -501,6 +530,60 @@ class GLViewport:
         self.set_selected_object(result.scene_object if result else None)
         return result
 
+    def begin_move_gizmo_drag(self, screen_x, screen_y):
+        if self._selected_object is None or self._gizmo_mode != "move":
+            return False
+        hit = pick_move_gizmo_axis(
+            self._selected_object,
+            self._camera,
+            screen_x,
+            screen_y,
+            self._width,
+            self._height,
+        )
+        if hit is None:
+            return False
+
+        axis_name, axis, origin, size = hit
+        self._move_drag = MoveGizmoDrag(
+            scene_object=self._selected_object,
+            axis_name=axis_name,
+            axis=axis,
+            origin=origin,
+            size=size,
+            start_mouse=np.asarray([screen_x, screen_y], dtype=np.float32),
+            start_translation=self._selected_object.translation,
+            start_matrix=_copy_matrix(self._selected_object.local_matrix)
+            if self._selected_object.matrix_mode
+            else None,
+        )
+        return True
+
+    def drag_move_gizmo(self, screen_x, screen_y):
+        if self._move_drag is None:
+            return False
+        delta = move_gizmo_drag_delta(
+            self._camera,
+            self._move_drag.origin,
+            self._move_drag.axis,
+            self._move_drag.size,
+            self._move_drag.start_mouse,
+            np.asarray([screen_x, screen_y], dtype=np.float32),
+            self._width,
+            self._height,
+        )
+        _apply_world_translation(
+            self._move_drag.scene_object,
+            delta,
+            start_translation=self._move_drag.start_translation,
+            start_matrix=self._move_drag.start_matrix,
+        )
+        self._refresh_scene_geometry()
+        return True
+
+    def end_move_gizmo_drag(self):
+        self._move_drag = None
+
     def poll_events(self):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -513,7 +596,10 @@ class GLViewport:
                 if event.button in (1, 2, 3):
                     self._drag_button = event.button
                     self._mouse_down_pos = event.pos
-                    self._mouse_dragged = False
+                    self._mouse_dragged = (
+                        event.button == 1
+                        and self.begin_move_gizmo_drag(*event.pos)
+                    )
                 elif event.button == 4:
                     self._camera.dolly(-120)
                     self._sync_world_camera()
@@ -526,6 +612,7 @@ class GLViewport:
                         self.pick_object(*event.pos)
                     self._drag_button = None
                     self._mouse_down_pos = None
+                    self.end_move_gizmo_drag()
             elif event.type == pygame.MOUSEWHEEL:
                 self._camera.dolly(-event.y * 120)
                 self._sync_world_camera()
@@ -535,7 +622,10 @@ class GLViewport:
                     dy = event.pos[1] - self._mouse_down_pos[1]
                     if dx * dx + dy * dy > 16:
                         self._mouse_dragged = True
-                self._handle_mouse_drag(event.rel)
+                if self._move_drag is not None:
+                    self.drag_move_gizmo(*event.pos)
+                else:
+                    self._handle_mouse_drag(event.rel)
 
     def update(self, image):
         self._mode = "image"
@@ -668,6 +758,14 @@ class GLViewport:
             self._scene_program,
             [(self._scene_vbo, "3f 3f 3f", "in_position", "in_normal", "in_color")],
         )
+
+    def _refresh_scene_geometry(self):
+        if self._world is None:
+            return
+        self._scene_buffers = build_scene_viewport_buffers(self._world)
+        self._upload_scene_buffers()
+        self._upload_selection_buffers()
+        self._upload_gizmo_buffers()
 
     def _upload_selection_buffers(self):
         if self._selection_vao is not None:
@@ -848,6 +946,92 @@ def _pick_object_shapes(obj, world_ray):
             closest = result
 
     return closest
+
+
+def pick_move_gizmo_axis(scene_object, viewport_camera, screen_x, screen_y, width, height, threshold=12.0):
+    origin = _object_gizmo_origin(scene_object)
+    size = _object_gizmo_size(scene_object)
+    mouse = np.asarray([screen_x, screen_y], dtype=np.float32)
+    best = None
+    best_distance = float(threshold)
+
+    for axis_name, axis in _gizmo_axes().items():
+        start = viewport_camera.project_point(origin, width, height)
+        end = viewport_camera.project_point(origin + axis * size, width, height)
+        if start is None or end is None:
+            continue
+        distance = _screen_segment_distance(mouse, start[:2], end[:2])
+        if distance <= best_distance:
+            best_distance = distance
+            best = (axis_name, axis, origin, size)
+
+    return best
+
+
+def move_gizmo_drag_delta(viewport_camera, origin, axis, size, start_mouse, current_mouse, width, height):
+    origin = _as_np3(origin)
+    axis = _normalize(axis)
+    start_mouse = np.asarray(start_mouse, dtype=np.float32)
+    current_mouse = np.asarray(current_mouse, dtype=np.float32)
+    start_screen = viewport_camera.project_point(origin, width, height)
+    end_screen = viewport_camera.project_point(origin + axis * float(size), width, height)
+    if start_screen is None or end_screen is None:
+        return np.zeros(3, dtype=np.float32)
+
+    screen_axis = end_screen[:2] - start_screen[:2]
+    screen_length = float(np.linalg.norm(screen_axis))
+    if screen_length <= 1e-5:
+        return np.zeros(3, dtype=np.float32)
+
+    screen_axis /= screen_length
+    scalar_pixels = float(np.dot(current_mouse - start_mouse, screen_axis))
+    world_units = scalar_pixels * (float(size) / screen_length)
+    return axis * world_units
+
+
+def _apply_world_translation(scene_object, world_delta, start_translation=None, start_matrix=None):
+    local_delta = _world_delta_to_parent_local(scene_object, world_delta)
+    if start_matrix is not None:
+        scene_object.local_matrix = (
+            Mat4x4.translation(local_delta.x, local_delta.y, local_delta.z)
+            * start_matrix
+        )
+        return
+
+    base = start_translation if start_translation is not None else scene_object.translation
+    scene_object.translation = base + local_delta
+
+
+def _world_delta_to_parent_local(scene_object, world_delta):
+    delta = _np_to_vec3(world_delta)
+    if scene_object.parent is not None:
+        return scene_object.parent.world_inverse_matrix.transform_vector(delta)
+    return delta
+
+
+def _copy_matrix(matrix):
+    return Mat4x4([row[:] for row in matrix.rows])
+
+
+def _gizmo_axes():
+    return {
+        "x": np.array([1.0, 0.0, 0.0], dtype=np.float32),
+        "y": np.array([0.0, 1.0, 0.0], dtype=np.float32),
+        "z": np.array([0.0, 0.0, 1.0], dtype=np.float32),
+    }
+
+
+def _screen_segment_distance(point, start, end):
+    point = np.asarray(point, dtype=np.float32)
+    start = np.asarray(start, dtype=np.float32)
+    end = np.asarray(end, dtype=np.float32)
+    segment = end - start
+    length_sq = float(np.dot(segment, segment))
+    if length_sq <= 1e-12:
+        return float(np.linalg.norm(point - start))
+    t = _clamp(float(np.dot(point - start, segment) / length_sq), 0.0, 1.0)
+    closest = start + segment * t
+    return float(np.linalg.norm(point - closest))
 
 
 def _extract_shape_arrays(obj, shape, default_color):
@@ -1103,6 +1287,11 @@ def _as_np3(value):
 
 def _vec3_to_np(value):
     return np.asarray([value.x, value.y, value.z], dtype=np.float32)
+
+
+def _np_to_vec3(value):
+    value = _as_np3(value)
+    return Vec3(float(value[0]), float(value[1]), float(value[2]))
 
 
 def _normalize(value):
