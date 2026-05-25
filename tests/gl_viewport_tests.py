@@ -1,6 +1,6 @@
 import numpy as np
 
-from core import Color, Mat4x4, Vec3
+from core import AABB, Color, Mat4x4, Vec3
 from rendering.gl_viewport import (
     ViewportCamera,
     _apply_world_translation,
@@ -64,6 +64,28 @@ def test_viewport_camera_frame_bounds_centers_camera_on_scene():
 
     assert np.allclose(camera.target, np.array([0.5, 0.5, 0.0], dtype=np.float32))
     assert camera.distance > 1.0
+    assert camera.far > camera.near
+
+
+def test_viewport_camera_frame_bounds_sets_adaptive_clip_planes():
+    camera = ViewportCamera(distance=1, near=0.001, far=10)
+    bounds = AABB(Vec3(-10, -5, -2), Vec3(10, 5, 2))
+
+    camera.frame_bounds(bounds)
+
+    assert camera.near > 0.001
+    assert camera.near < camera.distance
+    assert camera.far > camera.distance + 40
+
+
+def test_viewport_camera_dolly_refreshes_clip_planes():
+    camera = ViewportCamera(distance=10)
+    camera.frame_bounds(AABB(Vec3(-1, -1, -1), Vec3(1, 1, 1)))
+    old_near = camera.near
+
+    camera.dolly(-400)
+
+    assert camera.near != old_near
     assert camera.far > camera.near
 
 
@@ -249,6 +271,8 @@ if __name__ == "__main__":
         test_viewport_camera_screen_center_ray_points_forward,
         test_viewport_camera_projects_world_axes_to_screen,
         test_viewport_camera_frame_bounds_centers_camera_on_scene,
+        test_viewport_camera_frame_bounds_sets_adaptive_clip_planes,
+        test_viewport_camera_dolly_refreshes_clip_planes,
         test_scene_viewport_buffers_extract_indexed_mesh_vertices_and_color,
         test_scene_viewport_buffers_resolve_group_materials_per_triangle,
         test_pick_scene_object_returns_nearest_object_under_cursor,
