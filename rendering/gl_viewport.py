@@ -197,6 +197,7 @@ class ViewportCamera:
         self.fov = float(fov)
         self.near = float(near)
         self.far = float(far)
+        self._clip_radius = max(self.distance, 1.0)
 
     @property
     def eye(self):
@@ -239,6 +240,7 @@ class ViewportCamera:
     def dolly(self, delta, sensitivity=0.0015):
         self.distance *= math.exp(float(delta) * sensitivity)
         self.distance = max(self.distance, 0.001)
+        self._update_clip_planes()
 
     def frame_bounds(self, bounds, padding=1.35):
         if bounds is None:
@@ -251,8 +253,18 @@ class ViewportCamera:
             radius * padding / math.tan(math.radians(self.fov) * 0.5),
             0.001,
         )
-        self.near = max(self.distance - radius * 4.0, 0.001)
-        self.far = max(self.distance + radius * 4.0, self.near + 10.0)
+        self._update_clip_planes(radius)
+
+    def _update_clip_planes(self, radius=None):
+        if radius is not None:
+            self._clip_radius = max(float(radius), 0.001)
+        radius = max(self._clip_radius, 0.001)
+        self.near = max(min(self.distance * 0.02, radius * 0.05), 0.001)
+        self.far = max(
+            self.distance + radius * 8.0,
+            radius * 10.0,
+            self.near + 100.0,
+        )
 
     def view_matrix(self):
         eye = self.eye.astype(np.float32)
@@ -427,7 +439,7 @@ class GLViewport:
         self._wireframe = False
         self._render_requested = False
         self._selected_object = None
-        self._gizmo_mode = "move"
+        self._gizmo_mode = "select"
         self._camera = ViewportCamera()
 
         pygame.init()
@@ -509,8 +521,8 @@ class GLViewport:
         self._upload_gizmo_buffers()
 
     def set_gizmo_mode(self, mode):
-        if mode not in ("move", "rotate", "scale"):
-            raise ValueError("gizmo mode must be 'move', 'rotate', or 'scale'")
+        if mode not in ("select", "move", "rotate", "scale"):
+            raise ValueError("gizmo mode must be 'select', 'move', 'rotate', or 'scale'")
         if mode == self._gizmo_mode:
             return
         self._gizmo_mode = mode
@@ -816,7 +828,7 @@ class GLViewport:
             self._gizmo_vbo = None
         self._gizmo_vertex_count = 0
 
-        if self._selected_object is None:
+        if self._selected_object is None or self._gizmo_mode == "select":
             return
 
         origin = _object_gizmo_origin(self._selected_object)
@@ -865,6 +877,8 @@ class GLViewport:
             else:
                 self._camera.frame_bounds(self._scene_buffers.bounds)
             self._sync_world_camera()
+        elif key == pygame.K_q:
+            self.set_gizmo_mode("select")
         elif key == pygame.K_w:
             self.set_gizmo_mode("move")
         elif key == pygame.K_e:
