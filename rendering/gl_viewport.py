@@ -3,18 +3,26 @@
 # Date: May 2026
 # Version: 1.0
 # Description: OpenGL viewport using moderngl + pygame.
-#              Displays the Image pixel buffer as a fullscreen quad texture.
-#              Supports progressive scanline updates for live ray tracer preview.
+#              Displays ray-traced image buffers and interactive scene geometry.
 # ============================================
 
-import pygame
-import moderngl
+from dataclasses import dataclass
+import math
+
 import numpy as np
 
+from core import AABB, Vec3
+from scene.mesh import IndexedMesh, Mesh, Triangle
 
-# ── Shaders ──────────────────────────────────────────────────────────────────
+try:
+    import pygame
+    import moderngl
+except ImportError:  # pragma: no cover - tested via importable pure helpers.
+    pygame = None
+    moderngl = None
 
-VERTEX_SHADER = """
+
+IMAGE_VERTEX_SHADER = """
 #version 330
 
 in vec2 in_position;
@@ -27,7 +35,7 @@ void main() {
 }
 """
 
-FRAGMENT_SHADER = """
+IMAGE_FRAGMENT_SHADER = """
 #version 330
 
 uniform sampler2D texture0;
@@ -39,80 +47,314 @@ void main() {
 }
 """
 
-# Fullscreen quad — two triangles covering NDC [-1,1]
-# Each vertex: x, y, u, v
+SCENE_VERTEX_SHADER = """
+#version 330
+
+in vec3 in_position;
+in vec3 in_normal;
+in vec3 in_color;
+
+uniform mat4 view;
+uniform mat4 projection;
+
+out vec3 v_normal;
+out vec3 v_color;
+
+void main() {
+    v_normal = in_normal;
+    v_color = in_color;
+    gl_Position = projection * view * vec4(in_position, 1.0);
+}
+"""
+
+SCENE_FRAGMENT_SHADER = """
+#version 330
+
+in vec3 v_normal;
+in vec3 v_color;
+
+uniform vec3 light_direction;
+
+out vec4 out_color;
+
+void main() {
+    vec3 n = normalize(v_normal);
+    vec3 l = normalize(light_direction);
+    float diffuse = max(dot(n, l), 0.0);
+    vec3 color = v_color * (0.22 + diffuse * 0.78);
+    out_color = vec4(color, 1.0);
+}
+"""
+
+GRID_VERTEX_SHADER = """
+#version 330
+
+in vec3 in_position;
+in vec3 in_color;
+
+uniform mat4 view;
+uniform mat4 projection;
+
+out vec3 v_color;
+
+void main() {
+    v_color = in_color;
+    gl_Position = projection * view * vec4(in_position, 1.0);
+}
+"""
+
+GRID_FRAGMENT_SHADER = """
+#version 330
+
+in vec3 v_color;
+out vec4 out_color;
+
+void main() {
+    out_color = vec4(v_color, 1.0);
+}
+"""
+
 QUAD_VERTICES = np.array([
-    -1.0, -1.0,  0.0, 1.0,   # bottom-left   (image Y flipped: v=1 at bottom)
-     1.0, -1.0,  1.0, 1.0,   # bottom-right
-     1.0,  1.0,  1.0, 0.0,   # top-right
-    -1.0, -1.0,  0.0, 1.0,   # bottom-left
-     1.0,  1.0,  1.0, 0.0,   # top-right
-    -1.0,  1.0,  0.0, 0.0,   # top-left
-], dtype='f4')
+    -1.0, -1.0,  0.0, 1.0,
+     1.0, -1.0,  1.0, 1.0,
+     1.0,  1.0,  1.0, 0.0,
+    -1.0, -1.0,  0.0, 1.0,
+     1.0,  1.0,  1.0, 0.0,
+    -1.0,  1.0,  0.0, 0.0,
+], dtype="f4")
+
+
+@dataclass
+class SceneViewportBuffers:
+    vertices: np.ndarray
+    normals: np.ndarray
+    colors: np.ndarray
+    bounds: AABB | None
+    triangle_count: int
+    shape_count: int
+
+    @property
+    def vertex_count(self):
+        return int(len(self.vertices))
+
+    @property
+    def is_empty(self):
+        return self.vertex_count == 0
+
+
+class ViewportCamera:
+    """Small orbit camera for the interactive OpenGL scene viewport."""
+
+    def __init__(
+        self,
+        target=None,
+        distance=10.0,
+        yaw=0.0,
+        pitch=-20.0,
+        fov=45.0,
+        near=0.01,
+        far=10000.0,
+    ):
+        self.target = _as_np3(target if target is not None else (0.0, 0.0, 0.0))
+        self.distance = max(float(distance), 0.001)
+        self.yaw = float(yaw)
+        self.pitch = float(pitch)
+        self.fov = float(fov)
+        self.near = float(near)
+        self.far = float(far)
+
+    @property
+    def eye(self):
+        yaw = math.radians(self.yaw)
+        pitch = math.radians(self.pitch)
+        cp = math.cos(pitch)
+        offset = np.array([
+            math.sin(yaw) * cp,
+            math.sin(pitch),
+            math.cos(yaw) * cp,
+        ], dtype=np.float32)
+        return self.target + offset * self.distance
+
+    @property
+    def forward(self):
+        return _normalize(self.target - self.eye)
+
+    @property
+    def right(self):
+        return _normalize(np.cross(self.forward, np.array([0.0, 1.0, 0.0], dtype=np.float32)))
+
+    @property
+    def up(self):
+        return _normalize(np.cross(self.right, self.forward))
+
+    def orbit(self, dx, dy, sensitivity=0.25):
+        self.yaw -= float(dx) * sensitivity
+        self.pitch = _clamp(self.pitch + float(dy) * sensitivity, -89.0, 89.0)
+
+    def pan(self, dx, dy, width, height):
+        if height <= 0:
+            return
+        world_per_pixel = (
+            2.0 * self.distance * math.tan(math.radians(self.fov) * 0.5)
+            / float(height)
+        )
+        self.target += self.right * (-float(dx) * world_per_pixel)
+        self.target += self.up * (float(dy) * world_per_pixel)
+
+    def dolly(self, delta, sensitivity=0.0015):
+        self.distance *= math.exp(float(delta) * sensitivity)
+        self.distance = max(self.distance, 0.001)
+
+    def frame_bounds(self, bounds, padding=1.35):
+        if bounds is None:
+            return
+        center = _vec3_to_np((bounds.min + bounds.max) * 0.5)
+        extent = _vec3_to_np(bounds.max - bounds.min)
+        radius = max(float(np.linalg.norm(extent) * 0.5), 0.001)
+        self.target = center
+        self.distance = max(
+            radius * padding / math.tan(math.radians(self.fov) * 0.5),
+            0.001,
+        )
+        self.near = max(self.distance - radius * 4.0, 0.001)
+        self.far = max(self.distance + radius * 4.0, self.near + 10.0)
+
+    def view_matrix(self):
+        eye = self.eye.astype(np.float32)
+        target = self.target.astype(np.float32)
+        forward = _normalize(target - eye)
+        right = _normalize(np.cross(forward, np.array([0.0, 1.0, 0.0], dtype=np.float32)))
+        up = np.cross(right, forward)
+
+        return np.array([
+            [right[0], right[1], right[2], -float(np.dot(right, eye))],
+            [up[0], up[1], up[2], -float(np.dot(up, eye))],
+            [-forward[0], -forward[1], -forward[2], float(np.dot(forward, eye))],
+            [0.0, 0.0, 0.0, 1.0],
+        ], dtype=np.float32)
+
+    def projection_matrix(self, aspect):
+        aspect = max(float(aspect), 1e-6)
+        f = 1.0 / math.tan(math.radians(self.fov) * 0.5)
+        near = max(self.near, 0.001)
+        far = max(self.far, near + 0.001)
+        return np.array([
+            [f / aspect, 0.0, 0.0, 0.0],
+            [0.0, f, 0.0, 0.0],
+            [0.0, 0.0, (far + near) / (near - far), (2.0 * far * near) / (near - far)],
+            [0.0, 0.0, -1.0, 0.0],
+        ], dtype=np.float32)
+
+    def apply_to_camera(self, camera):
+        eye = self.eye
+        camera.position = Vec3(float(eye[0]), float(eye[1]), float(eye[2]))
+        fwd = self.forward
+        up = self.up
+        camera.forward = Vec3(float(fwd[0]), float(fwd[1]), float(fwd[2]))
+        camera.up = Vec3(float(up[0]), float(up[1]), float(up[2]))
+        camera.fov = self.fov
+
+
+def build_scene_viewport_buffers(world, default_color=(0.62, 0.66, 0.70)):
+    """Flatten renderable world geometry into GPU-friendly viewport arrays."""
+    vertices = []
+    normals = []
+    colors = []
+    bounds = None
+    triangle_count = 0
+    shape_count = 0
+
+    for obj in _walk_objects(world.objects):
+        if not getattr(obj, "visible", True):
+            continue
+        for shape in obj.shapes:
+            geometry = shape.geometry
+            extracted = _extract_shape_arrays(obj, shape, default_color)
+            if extracted is None:
+                continue
+
+            shape_vertices, shape_normals, shape_colors = extracted
+            if len(shape_vertices) == 0:
+                continue
+
+            vertices.append(shape_vertices)
+            normals.append(shape_normals)
+            colors.append(shape_colors)
+            triangle_count += len(shape_vertices) // 3
+            shape_count += 1
+
+            local_bounds = geometry.local_bounds()
+            if local_bounds is not None:
+                world_bounds = local_bounds.transform(obj.world_matrix)
+                bounds = world_bounds if bounds is None else bounds.union(world_bounds)
+
+    if not vertices:
+        empty_vec3 = np.zeros((0, 3), dtype=np.float32)
+        return SceneViewportBuffers(empty_vec3, empty_vec3, empty_vec3, None, 0, 0)
+
+    return SceneViewportBuffers(
+        np.concatenate(vertices, axis=0).astype(np.float32, copy=False),
+        np.concatenate(normals, axis=0).astype(np.float32, copy=False),
+        np.concatenate(colors, axis=0).astype(np.float32, copy=False),
+        bounds,
+        triangle_count,
+        shape_count,
+    )
 
 
 class GLViewport:
-    """Minimal OpenGL window for displaying a ray traced Image buffer.
+    """OpenGL window for path-traced images and direct scene previews."""
 
-    Usage:
-        viewport = GLViewport(800, 400, "Roxy")
-        while not viewport.should_close:
-            viewport.poll_events()
-            # ... trace scanline into image ...
-            viewport.update(image)
-        viewport.close()
-    """
+    def __init__(self, width, height, title="Roxy", world=None, sync_camera=False):
+        if pygame is None or moderngl is None:
+            raise RuntimeError("pygame and moderngl are required for GLViewport")
 
-    def __init__(self, width, height, title="Roxy"):
-        self._width = width
-        self._height = height
+        self._width = int(width)
+        self._height = int(height)
+        self._texture_width = int(width)
+        self._texture_height = int(height)
         self._should_close = False
+        self._mode = "scene" if world is not None else "image"
+        self._world = None
+        self._sync_camera = bool(sync_camera)
+        self._scene_buffers = None
+        self._scene_vbo = None
+        self._scene_vao = None
+        self._grid_vbo = None
+        self._grid_vao = None
+        self._grid_vertex_count = 0
+        self._drag_button = None
+        self._wireframe = False
+        self._render_requested = False
+        self._camera = ViewportCamera()
 
-        # ── pygame window with OpenGL context ────────────────────────────────
         pygame.init()
         pygame.display.set_caption(title)
-        
-        # macOS requires explicit OpenGL 3.3 core profile request
         pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
         pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
-        pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
+        pygame.display.gl_set_attribute(
+            pygame.GL_CONTEXT_PROFILE_MASK,
+            pygame.GL_CONTEXT_PROFILE_CORE,
+        )
         pygame.display.gl_set_attribute(pygame.GL_CONTEXT_FORWARD_COMPATIBLE_FLAG, True)
 
         pygame.display.set_mode(
-            (width, height),
-            pygame.OPENGL | pygame.DOUBLEBUF
+            (self._width, self._height),
+            pygame.OPENGL | pygame.DOUBLEBUF | pygame.RESIZABLE,
         )
 
-        # ── moderngl context ─────────────────────────────────────────────────
         self._ctx = moderngl.create_context()
-        self._ctx.viewport = (0, 0, width, height)
+        self._ctx.viewport = (0, 0, self._width, self._height)
+        self._ctx.enable(moderngl.DEPTH_TEST)
 
-        # ── Shader program ───────────────────────────────────────────────────
-        self._program = self._ctx.program(
-            vertex_shader=VERTEX_SHADER,
-            fragment_shader=FRAGMENT_SHADER,
-        )
+        self._init_image_resources()
+        self._init_scene_resources()
+        self._init_grid_resources()
 
-        # ── Fullscreen quad VAO ──────────────────────────────────────────────
-        self._vbo = self._ctx.buffer(QUAD_VERTICES.tobytes())
-        self._vao = self._ctx.vertex_array(
-            self._program,
-            [(self._vbo, '2f 2f', 'in_position', 'in_uv')]
-        )
-
-        # ── Texture (float32, RGB) ────────────────────────────────────────────
-        # dtype='f4' matches Image._pixels (np.float32)
-        self._texture = self._ctx.texture(
-            (width, height), 3, dtype='f4'
-        )
-        self._texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
-        self._texture.use(0)
-        self._program['texture0'] = 0
-
-        # Clear to black initially
-        self._ctx.clear(0.0, 0.0, 0.0)
-
-    # ── Properties ───────────────────────────────────────────────────────────
+        if world is not None:
+            self.set_world(world)
+        else:
+            self._ctx.clear(0.0, 0.0, 0.0)
 
     @property
     def should_close(self):
@@ -126,47 +368,391 @@ class GLViewport:
     def height(self):
         return self._height
 
-    # ── Public interface ──────────────────────────────────────────────────────
+    @property
+    def camera(self):
+        return self._camera
+
+    @property
+    def render_requested(self):
+        return self._render_requested
+
+    def consume_render_requested(self):
+        requested = self._render_requested
+        self._render_requested = False
+        return requested
+
+    def set_world(self, world, frame=True):
+        self._world = world
+        self._scene_buffers = build_scene_viewport_buffers(world)
+        self._upload_scene_buffers()
+        if frame and self._scene_buffers.bounds is not None:
+            self._camera.frame_bounds(self._scene_buffers.bounds)
+            self._sync_world_camera()
+        self._mode = "scene"
 
     def poll_events(self):
-        """Process pygame events — call once per frame."""
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 self._should_close = True
+            elif event.type == pygame.VIDEORESIZE:
+                self._resize(event.w, event.h)
             elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    self._should_close = True
+                self._handle_key(event.key)
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if event.button in (1, 2, 3):
+                    self._drag_button = event.button
+                elif event.button == 4:
+                    self._camera.dolly(-120)
+                    self._sync_world_camera()
+                elif event.button == 5:
+                    self._camera.dolly(120)
+                    self._sync_world_camera()
+            elif event.type == pygame.MOUSEBUTTONUP:
+                if event.button == self._drag_button:
+                    self._drag_button = None
+            elif event.type == pygame.MOUSEWHEEL:
+                self._camera.dolly(-event.y * 120)
+                self._sync_world_camera()
+            elif event.type == pygame.MOUSEMOTION and self._mode == "scene":
+                self._handle_mouse_drag(event.rel)
 
     def update(self, image):
-        """Upload Image pixel buffer to GPU texture and draw the fullscreen quad."""
-        # Upload numpy array to texture
-        # contiguous() ensures the array is a flat C-order block in memory
-        self._texture.write(image.pixels.tobytes())
-
-        # Draw
-        self._ctx.clear(0.0, 0.0, 0.0)
-        self._vao.render(moderngl.TRIANGLES)
-        pygame.display.flip()
+        self._mode = "image"
+        self._ensure_image_texture(image.width, image.height)
+        self._texture.write(np.ascontiguousarray(image.pixels).tobytes())
+        self._draw_image()
 
     def update_scanline(self, image, y):
-        """Upload only a single scanline — more efficient for progressive rendering.
-        
-        Writes one row of pixels to the texture at the correct vertical offset.
-        """
-        row_data = np.ascontiguousarray(image.pixels[y:y+1])
-        self._texture.write(row_data.tobytes(), viewport=(0, y, self._width, 1))
-        self._ctx.clear(0.0, 0.0, 0.0)
-        self._vao.render(moderngl.TRIANGLES)
+        self._mode = "image"
+        self._ensure_image_texture(image.width, image.height)
+        row_data = np.ascontiguousarray(image.pixels[y:y + 1])
+        self._texture.write(row_data.tobytes(), viewport=(0, y, image.width, 1))
+        self._draw_image()
+
+    def draw_scene(self):
+        self._mode = "scene"
+        self._ctx.enable(moderngl.DEPTH_TEST)
+        self._ctx.clear(0.035, 0.038, 0.044, 1.0)
+        self._write_scene_matrices(self._scene_program)
+        self._write_scene_matrices(self._grid_program)
+
+        if self._grid_vao is not None:
+            self._grid_vao.render(moderngl.LINES, vertices=self._grid_vertex_count)
+
+        if self._scene_vao is not None and self._scene_buffers is not None:
+            self._scene_program["light_direction"].value = (0.35, 0.82, 0.44)
+            self._ctx.wireframe = self._wireframe
+            self._scene_vao.render(moderngl.TRIANGLES, vertices=self._scene_buffers.vertex_count)
+            self._ctx.wireframe = False
+
         pygame.display.flip()
 
+    def refresh(self):
+        if self._mode == "scene":
+            self.draw_scene()
+
     def close(self):
-        """Clean up GL resources and quit pygame."""
-        self._vao.release()
-        self._vbo.release()
-        self._texture.release()
-        self._program.release()
+        for resource in (
+            self._image_vao,
+            self._image_vbo,
+            self._texture,
+            self._image_program,
+            self._scene_vao,
+            self._scene_vbo,
+            self._scene_program,
+            self._grid_vao,
+            self._grid_vbo,
+            self._grid_program,
+        ):
+            if resource is not None:
+                resource.release()
         self._ctx.release()
         pygame.quit()
 
+    def _init_image_resources(self):
+        self._image_program = self._ctx.program(
+            vertex_shader=IMAGE_VERTEX_SHADER,
+            fragment_shader=IMAGE_FRAGMENT_SHADER,
+        )
+        self._image_vbo = self._ctx.buffer(QUAD_VERTICES.tobytes())
+        self._image_vao = self._ctx.vertex_array(
+            self._image_program,
+            [(self._image_vbo, "2f 2f", "in_position", "in_uv")],
+        )
+        self._texture = self._ctx.texture(
+            (self._texture_width, self._texture_height),
+            3,
+            dtype="f4",
+        )
+        self._texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._texture.use(0)
+        self._image_program["texture0"] = 0
+
+    def _init_scene_resources(self):
+        self._scene_program = self._ctx.program(
+            vertex_shader=SCENE_VERTEX_SHADER,
+            fragment_shader=SCENE_FRAGMENT_SHADER,
+        )
+
+    def _init_grid_resources(self):
+        self._grid_program = self._ctx.program(
+            vertex_shader=GRID_VERTEX_SHADER,
+            fragment_shader=GRID_FRAGMENT_SHADER,
+        )
+        grid = _build_grid_vertices()
+        self._grid_vertex_count = len(grid)
+        self._grid_vbo = self._ctx.buffer(grid.tobytes())
+        self._grid_vao = self._ctx.vertex_array(
+            self._grid_program,
+            [(self._grid_vbo, "3f 3f", "in_position", "in_color")],
+        )
+
+    def _upload_scene_buffers(self):
+        if self._scene_vao is not None:
+            self._scene_vao.release()
+            self._scene_vao = None
+        if self._scene_vbo is not None:
+            self._scene_vbo.release()
+            self._scene_vbo = None
+
+        if self._scene_buffers is None or self._scene_buffers.is_empty:
+            return
+
+        interleaved = np.concatenate(
+            [
+                self._scene_buffers.vertices,
+                self._scene_buffers.normals,
+                self._scene_buffers.colors,
+            ],
+            axis=1,
+        ).astype(np.float32, copy=False)
+        self._scene_vbo = self._ctx.buffer(interleaved.tobytes())
+        self._scene_vao = self._ctx.vertex_array(
+            self._scene_program,
+            [(self._scene_vbo, "3f 3f 3f", "in_position", "in_normal", "in_color")],
+        )
+
+    def _draw_image(self):
+        self._ctx.disable(moderngl.DEPTH_TEST)
+        self._ctx.clear(0.0, 0.0, 0.0)
+        self._image_vao.render(moderngl.TRIANGLES)
+        pygame.display.flip()
+
+    def _ensure_image_texture(self, width, height):
+        width = int(width)
+        height = int(height)
+        if width == self._texture_width and height == self._texture_height:
+            return
+        self._texture.release()
+        self._texture_width = width
+        self._texture_height = height
+        self._texture = self._ctx.texture((width, height), 3, dtype="f4")
+        self._texture.filter = (moderngl.LINEAR, moderngl.LINEAR)
+        self._texture.use(0)
+
+    def _resize(self, width, height):
+        self._width = max(int(width), 1)
+        self._height = max(int(height), 1)
+        self._ctx.viewport = (0, 0, self._width, self._height)
+
+    def _handle_key(self, key):
+        if key == pygame.K_ESCAPE:
+            self._should_close = True
+        elif key == pygame.K_f and self._scene_buffers is not None:
+            self._camera.frame_bounds(self._scene_buffers.bounds)
+            self._sync_world_camera()
+        elif key == pygame.K_w:
+            self._wireframe = not self._wireframe
+        elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            self._render_requested = True
+
+    def _handle_mouse_drag(self, rel):
+        if self._drag_button is None:
+            return
+        dx, dy = rel
+        if self._drag_button == 1:
+            self._camera.orbit(dx, dy)
+        elif self._drag_button == 2:
+            self._camera.pan(dx, dy, self._width, self._height)
+        elif self._drag_button == 3:
+            self._camera.dolly(dy)
+        self._sync_world_camera()
+
+    def _write_scene_matrices(self, program):
+        aspect = self._width / self._height if self._height else 1.0
+        program["view"].write(_gl_matrix_bytes(self._camera.view_matrix()))
+        program["projection"].write(_gl_matrix_bytes(self._camera.projection_matrix(aspect)))
+
+    def _sync_world_camera(self):
+        if not self._sync_camera or self._world is None or self._world.active_camera is None:
+            return
+        self._camera.apply_to_camera(self._world.active_camera)
+
     def __repr__(self):
-        return f"GLViewport({self._width}x{self._height})"
+        return f"GLViewport({self._width}x{self._height}, mode={self._mode!r})"
+
+
+def _extract_shape_arrays(obj, shape, default_color):
+    geometry = shape.geometry
+    if isinstance(geometry, IndexedMesh):
+        arrays = geometry.indexed_triangle_arrays(
+            matrix=obj.world_matrix,
+            normal_matrix=obj.world_inverse_transpose_matrix,
+            dtype=np.float32,
+        )
+        vertices = np.stack([arrays["v0"], arrays["v1"], arrays["v2"]], axis=1).reshape((-1, 3))
+        normals = np.stack([arrays["n0"], arrays["n1"], arrays["n2"]], axis=1).reshape((-1, 3))
+        tri_colors = _colors_for_groups(shape, arrays["groups"], arrays["group_idx"], default_color)
+        colors = np.repeat(tri_colors, 3, axis=0)
+        return vertices, normals, colors
+
+    if isinstance(geometry, Mesh):
+        return _extract_triangles(
+            obj,
+            shape,
+            geometry._triangles,
+            default_color,
+        )
+
+    if isinstance(geometry, Triangle):
+        return _extract_triangles(obj, shape, [geometry], default_color)
+
+    local_bounds = geometry.local_bounds()
+    if local_bounds is None:
+        return None
+    return _extract_box_proxy(obj, shape, local_bounds, default_color)
+
+
+def _extract_triangles(obj, shape, triangles, default_color):
+    vertices = []
+    normals = []
+    colors = []
+    matrix = obj.world_matrix
+    normal_matrix = obj.world_inverse_transpose_matrix
+
+    for tri in triangles:
+        pts = [matrix.transform_point(p) for p in (tri._v0, tri._v1, tri._v2)]
+        n = normal_matrix.transform_vector(tri._normal).normalize()
+        color = _material_color(shape.material_for_group(tri.group), default_color)
+        vertices.extend(_vec3_to_np(p) for p in pts)
+        normals.extend(_vec3_to_np(n) for _ in range(3))
+        colors.extend(color for _ in range(3))
+
+    return (
+        np.asarray(vertices, dtype=np.float32).reshape((-1, 3)),
+        np.asarray(normals, dtype=np.float32).reshape((-1, 3)),
+        np.asarray(colors, dtype=np.float32).reshape((-1, 3)),
+    )
+
+
+def _extract_box_proxy(obj, shape, bounds, default_color):
+    mn, mx = bounds.min, bounds.max
+    corners = [
+        Vec3(mn.x, mn.y, mn.z),
+        Vec3(mx.x, mn.y, mn.z),
+        Vec3(mx.x, mx.y, mn.z),
+        Vec3(mn.x, mx.y, mn.z),
+        Vec3(mn.x, mn.y, mx.z),
+        Vec3(mx.x, mn.y, mx.z),
+        Vec3(mx.x, mx.y, mx.z),
+        Vec3(mn.x, mx.y, mx.z),
+    ]
+    faces = [
+        (0, 1, 2, 3, Vec3(0, 0, -1)),
+        (5, 4, 7, 6, Vec3(0, 0, 1)),
+        (4, 0, 3, 7, Vec3(-1, 0, 0)),
+        (1, 5, 6, 2, Vec3(1, 0, 0)),
+        (3, 2, 6, 7, Vec3(0, 1, 0)),
+        (4, 5, 1, 0, Vec3(0, -1, 0)),
+    ]
+    matrix = obj.world_matrix
+    normal_matrix = obj.world_inverse_transpose_matrix
+    color = _material_color(shape.material_for_group("default"), default_color)
+    vertices = []
+    normals = []
+    colors = []
+
+    for a, b, c, d, normal in faces:
+        transformed_normal = normal_matrix.transform_vector(normal).normalize()
+        for idx in (a, b, c, a, c, d):
+            vertices.append(_vec3_to_np(matrix.transform_point(corners[idx])))
+            normals.append(_vec3_to_np(transformed_normal))
+            colors.append(color)
+
+    return (
+        np.asarray(vertices, dtype=np.float32),
+        np.asarray(normals, dtype=np.float32),
+        np.asarray(colors, dtype=np.float32),
+    )
+
+
+def _colors_for_groups(shape, group_names, group_indices, default_color):
+    palette = np.asarray([
+        _material_color(shape.material_for_group(group), default_color)
+        for group in group_names
+    ], dtype=np.float32)
+    if len(palette) == 0:
+        palette = np.asarray([default_color], dtype=np.float32)
+    safe_indices = np.clip(group_indices.astype(np.int32, copy=False), 0, len(palette) - 1)
+    return palette[safe_indices]
+
+
+def _material_color(material, default_color):
+    if material is None:
+        return np.asarray(default_color, dtype=np.float32)
+    albedo = getattr(material, "_albedo", None)
+    if albedo is None:
+        return np.asarray(default_color, dtype=np.float32)
+    intensity = float(getattr(material, "_intensity", 1.0))
+    scale = min(max(intensity, 1.0), 4.0)
+    color = np.asarray([albedo.r, albedo.g, albedo.b], dtype=np.float32) * scale
+    return np.clip(color, 0.0, 1.0)
+
+
+def _walk_objects(objects):
+    for obj in objects:
+        yield obj
+        for child in obj.children:
+            yield from _walk_objects([child])
+
+
+def _build_grid_vertices(size=10.0, divisions=20):
+    lines = []
+    color = np.array([0.23, 0.25, 0.28], dtype=np.float32)
+    axis_x = np.array([0.45, 0.18, 0.18], dtype=np.float32)
+    axis_z = np.array([0.18, 0.24, 0.45], dtype=np.float32)
+    step = (size * 2.0) / divisions
+    for i in range(divisions + 1):
+        p = -size + i * step
+        line_color = axis_z if abs(p) < 1e-6 else color
+        lines.append([-size, 0.0, p, *line_color])
+        lines.append([size, 0.0, p, *line_color])
+        line_color = axis_x if abs(p) < 1e-6 else color
+        lines.append([p, 0.0, -size, *line_color])
+        lines.append([p, 0.0, size, *line_color])
+    return np.asarray(lines, dtype=np.float32)
+
+
+def _gl_matrix_bytes(matrix):
+    return np.asarray(matrix, dtype=np.float32).T.tobytes()
+
+
+def _as_np3(value):
+    if isinstance(value, Vec3):
+        return _vec3_to_np(value)
+    return np.asarray(value, dtype=np.float32).reshape((3,))
+
+
+def _vec3_to_np(value):
+    return np.asarray([value.x, value.y, value.z], dtype=np.float32)
+
+
+def _normalize(value):
+    length = float(np.linalg.norm(value))
+    if length <= 1e-12:
+        return np.zeros(3, dtype=np.float32)
+    return np.asarray(value / length, dtype=np.float32)
+
+
+def _clamp(value, low, high):
+    return max(low, min(high, value))
