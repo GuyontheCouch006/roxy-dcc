@@ -10,8 +10,10 @@ from scene.io.roxy_ascii import (
     parse_rxa,
     rxa_scene_for_obj,
     rxa_scene_to_world,
+    save_obj_as_roxy,
     world_to_rxa_scene,
 )
+from scene.io.roxy_binary import save_rxb_meshes
 from tests.utils import approx_eq, run_tests, vec3_approx_eq
 
 
@@ -126,6 +128,56 @@ def test_obj_reference_rxa_scene_imports_external_obj_hierarchy():
             pass
 
 
+def test_rxb_mesh_reference_imports_binary_payload():
+    rxb_path = tempfile.NamedTemporaryFile(suffix=".rxb", delete=False).name
+    try:
+        mesh = IndexedMesh(
+            [[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+            [[0, 1, 2]],
+            groups=["default"],
+            tri_group_idx=[0],
+            build_bvh=False,
+        )
+        save_rxb_meshes(rxb_path, {"tri": mesh})
+        scene = parse_rxa(f"""
+            createNode transform -n "asset";
+            setAttr "asset.matrix" -type matrix {_identity_values()};
+            createNode meshShape -n "assetShape" -p "asset";
+            setAttr "assetShape.geometry" -type rxbMesh "{os.path.basename(rxb_path)}:meshes/tri";
+        """)
+
+        world = rxa_scene_to_world(scene, base_dir=os.path.dirname(rxb_path))
+
+        assert isinstance(world.objects[0].shape, IndexedMesh)
+        assert world.objects[0].shape.triangle_count == 1
+    finally:
+        try:
+            os.unlink(rxb_path)
+        except OSError:
+            pass
+
+
+def test_save_obj_as_roxy_writes_rxa_and_rxb_pair():
+    obj_path = _write_obj("v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n")
+    rxa_path = tempfile.NamedTemporaryFile(suffix=".rxa", delete=False).name
+    rxb_path = rxa_path[:-4] + ".rxb"
+    try:
+        save_obj_as_roxy(obj_path, rxa_path, rxb_path=rxb_path, name="asset")
+        assert os.path.exists(rxa_path)
+        assert os.path.exists(rxb_path)
+
+        restored = load_scene(rxa_path)
+
+        assert restored.objects[0].name == "asset"
+        assert isinstance(restored.objects[0].children[0].shape, IndexedMesh)
+    finally:
+        for path in (obj_path, rxa_path, rxb_path):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+
 if __name__ == "__main__":
     run_tests([
         test_parse_create_set_and_connect_commands,
@@ -133,4 +185,6 @@ if __name__ == "__main__":
         test_world_translates_to_rxa_nodes_connections_and_back,
         test_load_save_scene_dispatches_rxa_extension,
         test_obj_reference_rxa_scene_imports_external_obj_hierarchy,
+        test_rxb_mesh_reference_imports_binary_payload,
+        test_save_obj_as_roxy_writes_rxa_and_rxb_pair,
     ])

@@ -6,6 +6,7 @@ from pathlib import Path
 from core import Color, Mat4x4, Point3, Vec3
 from scene.camera import Camera
 from scene.materials import Diffuse, Dielectric, Emissive, Glossy, Metal
+from scene.mesh import IndexedMesh
 from scene.primitives import Cube, Plane, Sphere
 from scene.scene_object import SceneObject
 from scene.shape import Shape
@@ -92,6 +93,41 @@ def rxa_scene_for_obj(path, name=None, indexed=True):
     return scene
 
 
+def save_obj_as_roxy(obj_path, rxa_path, rxb_path=None, name=None, indexed=True):
+    """Convert an OBJ into paired RXA/RXB files.
+
+    RXA stores the scene graph, transforms, shape nodes, and shader connections.
+    RXB stores the heavy mesh arrays referenced by each meshShape.geometry attr.
+    """
+    from scene.io.obj_reader import OBJReader
+    from scene.io.roxy_binary import save_rxb_meshes
+
+    if not indexed:
+        raise ValueError("save_obj_as_roxy currently requires indexed=True for RXB mesh payloads")
+
+    obj_root = OBJReader.load(obj_path, name=name, indexed=indexed)
+    world = World(use_sky=True)
+    world.add_object(obj_root)
+
+    rxa_path = Path(rxa_path)
+    rxb_path = Path(rxb_path) if rxb_path is not None else rxa_path.with_suffix(".rxb")
+    rxb_ref_path = str(Path(_relative_path(rxb_path, rxa_path.parent)))
+    rxb_meshes = {}
+
+    scene = world_to_rxa_scene(
+        world,
+        rxb_ref_path=rxb_ref_path,
+        rxb_meshes=rxb_meshes,
+    )
+    if not rxb_meshes:
+        raise ValueError("OBJ export produced no IndexedMesh payloads for RXB")
+    save_rxb_meshes(rxb_path, rxb_meshes)
+    rxa_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(rxa_path, "w") as f:
+        f.write(dumps_rxa(scene))
+    return scene
+
+
 def parse_rxa(text):
     scene = RXAScene()
     for statement in _split_statements(text):
@@ -133,7 +169,7 @@ def dumps_rxa(scene):
     return "\n".join(lines) + "\n"
 
 
-def world_to_rxa_scene(world):
+def world_to_rxa_scene(world, rxb_ref_path=None, rxb_meshes=None):
     scene = RXAScene()
     used_names = set()
     material_nodes = {}
@@ -184,7 +220,13 @@ def world_to_rxa_scene(world):
         for index, shape in enumerate(obj.shapes):
             shape_name = _unique_name(shape.name or f"{node_name}Shape{index + 1}", used_names)
             shape_node = scene.create_node(_shape_node_type(shape.geometry), shape_name, parent=node_name)
-            _write_geometry_attrs(shape_node, shape.geometry)
+            _write_geometry_attrs(
+                shape_node,
+                shape.geometry,
+                rxb_ref_path=rxb_ref_path,
+                rxb_meshes=rxb_meshes,
+                mesh_name=shape_name,
+            )
             for group_name, material in shape.material_groups.items():
                 shader_name = export_material(material, shape_name, group_name)
                 if shader_name:
@@ -251,7 +293,7 @@ def rxa_scene_to_world(scene, base_dir=None):
         if node.type_name == "meshShape" and node.attr("source") is not None:
             _attach_external_mesh(node, objects[node.parent], base_dir=base_dir)
             continue
-        geometry = _geometry_from_node(node)
+        geometry = _geometry_from_node(node, base_dir=base_dir)
         objects[node.parent].shapes.append(
             Shape(geometry, shape_materials.get(node.name, {}), name=node.name)
         )
@@ -471,7 +513,7 @@ def _shape_node_type(geometry):
     return "meshShape"
 
 
-def _write_geometry_attrs(node, geometry):
+def _write_geometry_attrs(node, geometry, rxb_ref_path=None, rxb_meshes=None, mesh_name=None):
     if isinstance(geometry, Sphere):
         node.attrs["radius"] = RXAAttribute("float", geometry._radius)
     elif isinstance(geometry, Plane):
@@ -479,6 +521,12 @@ def _write_geometry_attrs(node, geometry):
         node.attrs["distance"] = RXAAttribute("float", geometry._distance)
     elif isinstance(geometry, Cube):
         node.attrs["sideLength"] = RXAAttribute("float", geometry._side_length)
+    elif isinstance(geometry, IndexedMesh) and rxb_ref_path is not None and rxb_meshes is not None:
+        payload_name = mesh_name or geometry._name or node.name
+        rxb_meshes[payload_name] = geometry
+        node.attrs["geometry"] = RXAAttribute("rxbMesh", f"{rxb_ref_path}:meshes/{payload_name}")
+        node.attrs["geometryStorage"] = RXAAttribute("string", "rxb")
+        node.attrs["geometryName"] = RXAAttribute("string", payload_name)
     else:
         node.attrs["geometryStorage"] = RXAAttribute("string", "external-or-rxb-required")
         node.attrs["geometryType"] = RXAAttribute("string", geometry.to_dict().get("type", type(geometry).__name__))
@@ -488,7 +536,7 @@ def _is_shape_node(node):
     return node.type_name.endswith("Shape")
 
 
-def _geometry_from_node(node):
+def _geometry_from_node(node, base_dir=None):
     if node.type_name == "sphereShape":
         return Sphere(node.attr("radius", 1.0))
     if node.type_name == "planeShape":
@@ -496,6 +544,14 @@ def _geometry_from_node(node):
     if node.type_name == "cubeShape":
         return Cube(node.attr("sideLength", 1.0))
     if node.type_name == "meshShape":
+        geometry = node.attr("geometry")
+        if geometry and (node.attr_type("geometry") == "rxbMesh" or ".rxb:" in geometry):
+            from scene.io.roxy_binary import load_rxb_mesh_ref
+            return load_rxb_mesh_ref(
+                geometry,
+                base_dir=base_dir,
+                build_bvh=bool(node.attr("buildBvh", False)),
+            )
         raise NotImplementedError("meshShape import needs external OBJ or RXB geometry payload support")
     raise ValueError(f"Unknown shape node type: {node.type_name}")
 
@@ -592,3 +648,11 @@ def _first_node_of_type(scene, type_name):
         if node.type_name == type_name:
             return node
     return None
+
+
+def _relative_path(path, start):
+    try:
+        return Path(path).resolve().relative_to(Path(start).resolve())
+    except ValueError:
+        import os
+        return os.path.relpath(path, start)
