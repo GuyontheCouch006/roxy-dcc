@@ -1,1 +1,4 @@
+moderngl
+numpy
+pygame
 pyassimp
