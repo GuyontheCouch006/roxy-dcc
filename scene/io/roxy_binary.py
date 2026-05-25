@@ -6,7 +6,7 @@ import numpy as np
 from scene.mesh import IndexedMesh
 
 
-RXB_FORMAT_VERSION = 1
+RXB_FORMAT_VERSION = 2
 _METADATA_KEY = "__metadata__"
 
 
@@ -24,34 +24,59 @@ def save_rxb_meshes(path, meshes):
     metadata = {
         "format": "rxb",
         "version": RXB_FORMAT_VERSION,
+        "buffers": {},
         "meshes": {},
     }
     arrays = {}
+    buffer_lookup = {}
 
     for index, (name, mesh) in enumerate(items):
         if not isinstance(mesh, IndexedMesh):
             raise TypeError(f"RXB mesh payload {name!r} is not an IndexedMesh")
 
         prefix = f"mesh_{index}"
+        positions_buffer = _store_shared_buffer(
+            arrays,
+            metadata,
+            buffer_lookup,
+            "positions",
+            mesh._positions,
+            dtype=np.float64,
+        )
+        normals_buffer = _store_shared_buffer(
+            arrays,
+            metadata,
+            buffer_lookup,
+            "normals",
+            mesh._normals,
+            dtype=np.float64,
+        )
+        uvs_buffer = _store_shared_buffer(
+            arrays,
+            metadata,
+            buffer_lookup,
+            "uvs",
+            mesh._uvs,
+            dtype=np.float64,
+        )
+
         metadata["meshes"][name] = {
             "prefix": prefix,
             "name": mesh._name,
             "groups": list(mesh._groups),
             "has_normals": mesh._normals is not None,
             "has_uvs": mesh._uvs is not None,
+            "positions_buffer": positions_buffer,
+            "normals_buffer": normals_buffer,
+            "uvs_buffer": uvs_buffer,
             "vertex_count": mesh.vertex_count,
             "triangle_count": mesh.triangle_count,
         }
 
-        arrays[f"{prefix}.positions"] = np.asarray(mesh._positions, dtype=np.float64)
         arrays[f"{prefix}.tri_pos_idx"] = np.asarray(mesh._tri_pos_idx, dtype=np.int32)
         arrays[f"{prefix}.tri_normal_idx"] = np.asarray(mesh._tri_normal_idx, dtype=np.int32)
         arrays[f"{prefix}.tri_uv_idx"] = np.asarray(mesh._tri_uv_idx, dtype=np.int32)
         arrays[f"{prefix}.tri_group_idx"] = np.asarray(mesh._tri_group_idx, dtype=np.int32)
-        if mesh._normals is not None:
-            arrays[f"{prefix}.normals"] = np.asarray(mesh._normals, dtype=np.float64)
-        if mesh._uvs is not None:
-            arrays[f"{prefix}.uvs"] = np.asarray(mesh._uvs, dtype=np.float64)
 
     arrays[_METADATA_KEY] = _metadata_to_array(metadata)
     with open(path, "wb") as f:
@@ -67,7 +92,7 @@ def list_rxb_meshes(path):
     return list(load_rxb_metadata(path).get("meshes", {}).keys())
 
 
-def load_rxb_mesh(path, name, build_bvh=False):
+def load_rxb_mesh(path, name, build_bvh=False, cache=None):
     path = Path(path)
     with np.load(path, allow_pickle=False) as archive:
         metadata = _metadata_from_array(archive[_METADATA_KEY])
@@ -79,19 +104,30 @@ def load_rxb_mesh(path, name, build_bvh=False):
             raise KeyError(f"RXB mesh {name!r} not found in {path}; available: {available}") from exc
 
         prefix = mesh_meta["prefix"]
-        normals = (
-            np.array(archive[f"{prefix}.normals"], copy=True)
-            if mesh_meta.get("has_normals")
-            else None
+        positions = _load_mesh_positions(path, archive, metadata, mesh_meta, prefix, cache)
+        normals = _load_mesh_optional_buffer(
+            path,
+            archive,
+            metadata,
+            mesh_meta,
+            prefix,
+            "normals",
+            "normals_buffer",
+            cache,
         )
-        uvs = (
-            np.array(archive[f"{prefix}.uvs"], copy=True)
-            if mesh_meta.get("has_uvs")
-            else None
+        uvs = _load_mesh_optional_buffer(
+            path,
+            archive,
+            metadata,
+            mesh_meta,
+            prefix,
+            "uvs",
+            "uvs_buffer",
+            cache,
         )
 
         return IndexedMesh(
-            np.array(archive[f"{prefix}.positions"], copy=True),
+            positions,
             np.array(archive[f"{prefix}.tri_pos_idx"], copy=True),
             normals=normals,
             tri_normal_idx=np.array(archive[f"{prefix}.tri_normal_idx"], copy=True),
@@ -104,9 +140,9 @@ def load_rxb_mesh(path, name, build_bvh=False):
         )
 
 
-def load_rxb_mesh_ref(ref, base_dir=None, build_bvh=False):
+def load_rxb_mesh_ref(ref, base_dir=None, build_bvh=False, cache=None):
     path, mesh_name = split_rxb_mesh_ref(ref, base_dir=base_dir)
-    return load_rxb_mesh(path, mesh_name, build_bvh=build_bvh)
+    return load_rxb_mesh(path, mesh_name, build_bvh=build_bvh, cache=cache)
 
 
 def split_rxb_mesh_ref(ref, base_dir=None):
@@ -135,8 +171,67 @@ def _metadata_from_array(array):
 def _validate_metadata(metadata, path):
     if metadata.get("format") != "rxb":
         raise ValueError(f"{path} is not a Roxy Binary file")
-    if metadata.get("version") != RXB_FORMAT_VERSION:
+    if metadata.get("version") not in (1, RXB_FORMAT_VERSION):
         raise ValueError(
             f"Unsupported RXB version {metadata.get('version')} in {path}; "
             f"expected {RXB_FORMAT_VERSION}"
         )
+
+
+def _store_shared_buffer(arrays, metadata, buffer_lookup, kind, value, dtype):
+    if value is None:
+        return None
+
+    array = np.asarray(value, dtype=dtype)
+    key = (kind, _shared_array_key(array))
+    if key in buffer_lookup:
+        return buffer_lookup[key]
+
+    buffer_id = f"{kind}_{sum(1 for b in metadata['buffers'].values() if b['kind'] == kind)}"
+    array_name = f"buffer.{buffer_id}"
+    arrays[array_name] = array
+    metadata["buffers"][buffer_id] = {
+        "kind": kind,
+        "array": array_name,
+        "dtype": str(array.dtype),
+        "shape": list(array.shape),
+    }
+    buffer_lookup[key] = buffer_id
+    return buffer_id
+
+
+def _shared_array_key(array):
+    data = array.__array_interface__["data"][0]
+    return (data, array.shape, str(array.dtype), array.strides)
+
+
+def _load_mesh_positions(path, archive, metadata, mesh_meta, prefix, cache):
+    buffer_id = mesh_meta.get("positions_buffer")
+    if buffer_id:
+        return _load_shared_buffer(path, archive, metadata, buffer_id, cache)
+    return np.array(archive[f"{prefix}.positions"], copy=True)
+
+
+def _load_mesh_optional_buffer(path, archive, metadata, mesh_meta, prefix, legacy_name, buffer_key, cache):
+    if not mesh_meta.get(f"has_{legacy_name}"):
+        return None
+    buffer_id = mesh_meta.get(buffer_key)
+    if buffer_id:
+        return _load_shared_buffer(path, archive, metadata, buffer_id, cache)
+    return np.array(archive[f"{prefix}.{legacy_name}"], copy=True)
+
+
+def _load_shared_buffer(path, archive, metadata, buffer_id, cache):
+    buffer_meta = metadata.get("buffers", {}).get(buffer_id)
+    if buffer_meta is None:
+        raise KeyError(f"RXB buffer {buffer_id!r} not found in {path}")
+
+    resolved = str(Path(path).resolve())
+    cache_key = (resolved, buffer_id)
+    if cache is not None and cache_key in cache:
+        return cache[cache_key]
+
+    array = np.array(archive[buffer_meta["array"]], copy=True)
+    if cache is not None:
+        cache[cache_key] = array
+    return array

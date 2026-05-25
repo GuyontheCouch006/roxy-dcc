@@ -285,6 +285,7 @@ def rxa_scene_to_world(scene, base_dir=None):
 
     materials = _build_materials(scene)
     shape_materials = _shape_material_connections(scene, materials)
+    rxb_cache = {}
     for node in scene.nodes.values():
         if not _is_shape_node(node):
             continue
@@ -293,7 +294,7 @@ def rxa_scene_to_world(scene, base_dir=None):
         if node.type_name == "meshShape" and node.attr("source") is not None:
             _attach_external_mesh(node, objects[node.parent], base_dir=base_dir)
             continue
-        geometry = _geometry_from_node(node, base_dir=base_dir)
+        geometry = _geometry_from_node(node, base_dir=base_dir, rxb_cache=rxb_cache)
         objects[node.parent].shapes.append(
             Shape(geometry, shape_materials.get(node.name, {}), name=node.name)
         )
@@ -536,7 +537,7 @@ def _is_shape_node(node):
     return node.type_name.endswith("Shape")
 
 
-def _geometry_from_node(node, base_dir=None):
+def _geometry_from_node(node, base_dir=None, rxb_cache=None):
     if node.type_name == "sphereShape":
         return Sphere(node.attr("radius", 1.0))
     if node.type_name == "planeShape":
@@ -551,6 +552,7 @@ def _geometry_from_node(node, base_dir=None):
                 geometry,
                 base_dir=base_dir,
                 build_bvh=bool(node.attr("buildBvh", False)),
+                cache=rxb_cache,
             )
         raise NotImplementedError("meshShape import needs external OBJ or RXB geometry payload support")
     raise ValueError(f"Unknown shape node type: {node.type_name}")
