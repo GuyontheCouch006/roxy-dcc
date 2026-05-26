@@ -1,4 +1,8 @@
-from PySide6 import QtCore
+import os
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from app.scene_graph import SceneGraphModel, SceneGraphRoles
 from core import Color, Vec3
@@ -14,11 +18,14 @@ def test_scene_graph_model_exposes_world_sections():
 
     assert world_index.isValid()
     assert world_index.data() == "World"
+    assert model.columnCount() == 1
     assert model.rowCount(world_index) == 3
     assert model.index(0, 0, world_index).data() == "Objects"
     assert model.index(1, 0, world_index).data() == "Cameras"
     assert model.index(2, 0, world_index).data() == "Lights"
-    assert world_index.siblingAtColumn(2).data() == "1 objects, 1 cameras, 0 lights"
+    assert "1 objects, 1 cameras, 0 lights" in world_index.data(
+        QtCore.Qt.ItemDataRole.ToolTipRole
+    )
 
 
 def test_scene_graph_model_preserves_object_child_and_shape_relationships():
@@ -52,7 +59,19 @@ def test_scene_graph_model_marks_active_camera():
 
     assert camera_index.isValid()
     assert camera_index.data() == "shotCam"
-    assert "active" in camera_index.siblingAtColumn(2).data()
+    assert "active" in camera_index.data(QtCore.Qt.ItemDataRole.ToolTipRole)
+
+
+def test_scene_graph_model_provides_outliner_icons():
+    _ensure_qapp()
+    world, root, _child = _world_with_hierarchy()
+    model = SceneGraphModel(world)
+    root_index = model.index_for_payload(root)
+
+    icon = root_index.data(QtCore.Qt.ItemDataRole.DecorationRole)
+
+    assert isinstance(icon, QtGui.QIcon)
+    assert not icon.isNull()
 
 
 def test_scene_graph_model_visibility_checkbox_updates_world_object():
@@ -99,11 +118,16 @@ def _world_with_hierarchy():
     return world, root, child
 
 
+def _ensure_qapp():
+    return QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+
 if __name__ == "__main__":
     run_tests([
         test_scene_graph_model_exposes_world_sections,
         test_scene_graph_model_preserves_object_child_and_shape_relationships,
         test_scene_graph_model_marks_active_camera,
+        test_scene_graph_model_provides_outliner_icons,
         test_scene_graph_model_visibility_checkbox_updates_world_object,
         test_scene_graph_model_iter_nodes_can_filter_by_kind,
     ])

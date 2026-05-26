@@ -18,11 +18,11 @@ class SceneGraphPanel(QtWidgets.QWidget):
         self._tree.setUniformRowHeights(True)
         self._tree.setAlternatingRowColors(True)
         self._tree.setExpandsOnDoubleClick(True)
+        self._tree.setIconSize(QtCore.QSize(18, 18))
         self._tree.expandToDepth(1)
+        self._tree.header().setHidden(True)
         self._tree.header().setStretchLastSection(True)
         self._tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Stretch)
-        self._tree.header().setSectionResizeMode(1, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
-        self._tree.header().setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeMode.ResizeToContents)
         self._tree.selectionModel().currentChanged.connect(self._on_current_changed)
 
         layout = QtWidgets.QVBoxLayout(self)
