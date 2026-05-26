@@ -10,22 +10,18 @@ from scene import Camera, Diffuse, SceneObject, Sphere, World
 from tests.utils import run_tests
 
 
-def test_scene_graph_model_exposes_world_sections():
+def test_scene_graph_model_uses_world_as_hidden_root():
     world, _root, _child = _world_with_hierarchy()
     model = SceneGraphModel(world)
 
-    world_index = model.index(0, 0, QtCore.QModelIndex())
+    hidden_root = model.node_from_index(QtCore.QModelIndex())
 
-    assert world_index.isValid()
-    assert world_index.data() == "World"
+    assert hidden_root.name == "World"
+    assert hidden_root.payload is world
     assert model.columnCount() == 1
-    assert model.rowCount(world_index) == 3
-    assert model.index(0, 0, world_index).data() == "Objects"
-    assert model.index(1, 0, world_index).data() == "Cameras"
-    assert model.index(2, 0, world_index).data() == "Lights"
-    assert "1 objects, 1 cameras, 0 lights" in world_index.data(
-        QtCore.Qt.ItemDataRole.ToolTipRole
-    )
+    assert model.rowCount(QtCore.QModelIndex()) == 2
+    assert model.index(0, 0, QtCore.QModelIndex()).data() == "assembly"
+    assert model.index(1, 0, QtCore.QModelIndex()).data() == "shotCam"
 
 
 def test_scene_graph_model_preserves_object_child_and_shape_relationships():
@@ -103,6 +99,18 @@ def test_scene_graph_model_iter_nodes_can_filter_by_kind():
     assert shape_names == ["wheel"]
 
 
+def test_scene_graph_model_selection_includes_child_objects():
+    world, root, child = _world_with_hierarchy()
+    model = SceneGraphModel(world)
+    root_index = model.index_for_payload(root)
+    child_index = model.index_for_payload(child)
+    camera_index = model.index_for_payload(world.active_camera)
+
+    assert model.scene_objects_for_index(root_index) == (root, child)
+    assert model.scene_objects_for_index(child_index) == (child,)
+    assert model.scene_objects_for_index(camera_index) == ()
+
+
 def _world_with_hierarchy():
     world = World(use_sky=False)
     root = SceneObject(name="assembly")
@@ -124,10 +132,11 @@ def _ensure_qapp():
 
 if __name__ == "__main__":
     run_tests([
-        test_scene_graph_model_exposes_world_sections,
+        test_scene_graph_model_uses_world_as_hidden_root,
         test_scene_graph_model_preserves_object_child_and_shape_relationships,
         test_scene_graph_model_marks_active_camera,
         test_scene_graph_model_provides_outliner_icons,
         test_scene_graph_model_visibility_checkbox_updates_world_object,
         test_scene_graph_model_iter_nodes_can_filter_by_kind,
+        test_scene_graph_model_selection_includes_child_objects,
     ])

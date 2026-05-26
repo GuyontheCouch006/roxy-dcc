@@ -40,7 +40,7 @@ class SceneGraphNode:
     def path(self):
         parts = []
         node = self
-        while node is not None and node.kind != "root":
+        while node is not None and node.parent is not None:
             parts.append(node.name)
             node = node.parent
         return "/".join(reversed(parts))
@@ -184,6 +184,15 @@ class SceneGraphModel(QtCore.QAbstractItemModel):
             return QtCore.QModelIndex()
         return self.createIndex(node.row(), column, node)
 
+    def scene_objects_for_index(self, index):
+        if not index.isValid():
+            return ()
+        return tuple(
+            node.payload
+            for node in self._iter_subtree(self.node_from_index(index))
+            if node.kind == "object" and node.payload is not None
+        )
+
     def iter_nodes(self, kind=None):
         def walk(node):
             for child in node.children:
@@ -199,33 +208,27 @@ class SceneGraphModel(QtCore.QAbstractItemModel):
                 return node
         return None
 
+    def _iter_subtree(self, node):
+        if node is None:
+            return
+        yield node
+        for child in node.children:
+            yield from self._iter_subtree(child)
+
     def _build_tree(self, world):
-        root = SceneGraphNode("Root", "root")
         if world is None:
-            root.append(SceneGraphNode("World", "world", detail="empty"))
-            return root
+            return SceneGraphNode("World", "world", detail="empty")
 
-        world_node = root.append(
-            SceneGraphNode("World", "world", world, _world_detail(world))
-        )
+        root = SceneGraphNode("World", "world", world, _world_detail(world))
 
-        objects = world_node.append(
-            SceneGraphNode("Objects", "section", detail=_count_detail(world.objects, "object"))
-        )
         for row, obj in enumerate(world.objects):
-            objects.append(_object_node(obj, row))
+            root.append(_object_node(obj, row))
 
-        cameras = world_node.append(
-            SceneGraphNode("Cameras", "section", detail=_count_detail(world.cameras, "camera"))
-        )
         for row, camera in enumerate(world.cameras):
-            cameras.append(_camera_node(camera, row, camera is world.active_camera))
+            root.append(_camera_node(camera, row, camera is world.active_camera))
 
-        lights = world_node.append(
-            SceneGraphNode("Lights", "section", detail=_count_detail(world.lights, "light"))
-        )
         for row, light in enumerate(world.lights):
-            lights.append(_light_node(light, row))
+            root.append(_light_node(light, row))
 
         return root
 

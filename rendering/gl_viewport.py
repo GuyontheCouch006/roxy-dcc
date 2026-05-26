@@ -191,8 +191,8 @@ class ViewportCamera:
         yaw=0.0,
         pitch=-20.0,
         fov=45.0,
-        near=0.01,
-        far=10000.0,
+        near=0.001,
+        far=100000.0,
     ):
         self.target = _as_np3(target if target is not None else (0.0, 0.0, 0.0))
         self.distance = max(float(distance), 0.001)

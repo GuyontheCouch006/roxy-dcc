@@ -71,6 +71,7 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         self._camera = ViewportCamera()
         self._scene_buffers = None
         self._selected_object = None
+        self._selected_objects = ()
         self._gizmo_mode = "select"
         self._wireframe = False
 
@@ -111,6 +112,10 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         return self._selected_object
 
     @property
+    def selected_objects(self):
+        return self._selected_objects
+
+    @property
     def gizmo_mode(self):
         return self._gizmo_mode
 
@@ -145,14 +150,28 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
     def set_selected_object(self, scene_object, emit=False):
         if scene_object is not None and not isinstance(scene_object, SceneObject):
             scene_object = None
-        if scene_object is self._selected_object:
+        self.set_selected_objects(
+            (scene_object,) if scene_object is not None else (),
+            active_object=scene_object,
+            emit=emit,
+        )
+
+    def set_selected_objects(self, scene_objects, active_object=None, emit=False):
+        selected = _unique_scene_objects(scene_objects)
+        if active_object is not None and active_object not in selected:
+            active_object = None
+        if active_object is None and len(selected) == 1:
+            active_object = selected[0]
+
+        if selected == self._selected_objects and active_object is self._selected_object:
             return
-        self._selected_object = scene_object
+        self._selected_objects = selected
+        self._selected_object = active_object
         self._upload_selection_if_ready()
         self._upload_gizmo_if_ready()
         self.update()
         if emit:
-            self.objectSelected.emit(scene_object)
+            self.objectSelected.emit(active_object)
 
     def set_gizmo_mode(self, mode):
         if mode not in ("select", "move", "rotate", "scale"):
@@ -167,10 +186,17 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         if self._scene_buffers is None:
             return
         bounds = self._scene_buffers.bounds
-        if self._selected_object is not None:
-            span = self._scene_buffers.span_for(self._selected_object)
+        selected_bounds = None
+        for scene_object in self._selected_objects:
+            span = self._scene_buffers.span_for(scene_object)
             if span is not None and span.bounds is not None:
-                bounds = span.bounds
+                selected_bounds = (
+                    span.bounds
+                    if selected_bounds is None
+                    else selected_bounds.union(span.bounds)
+                )
+        if selected_bounds is not None:
+            bounds = selected_bounds
         if bounds is not None:
             self._camera.frame_bounds(bounds)
             self._sync_world_camera()
@@ -645,29 +671,45 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
 
         if (
             self._scene_buffers is None
-            or self._selected_object is None
+            or not self._selected_objects
             or self._scene_buffers.is_empty
         ):
             return
 
-        span = self._scene_buffers.span_for(self._selected_object)
-        if span is None or span.count <= 0:
+        spans = [
+            span
+            for scene_object in self._selected_objects
+            for span in (self._scene_buffers.span_for(scene_object),)
+            if span is not None and span.count > 0
+        ]
+        if not spans:
             return
 
-        start = span.start
-        end = start + span.count
-        vertices = self._scene_buffers.vertices[start:end]
-        normals = self._scene_buffers.normals[start:end]
+        vertices = np.concatenate(
+            [
+                self._scene_buffers.vertices[span.start:span.start + span.count]
+                for span in spans
+            ],
+            axis=0,
+        )
+        normals = np.concatenate(
+            [
+                self._scene_buffers.normals[span.start:span.start + span.count]
+                for span in spans
+            ],
+            axis=0,
+        )
+        vertex_count = len(vertices)
         colors = np.repeat(
             np.asarray([[1.0, 0.63, 0.12]], dtype=np.float32),
-            span.count,
+            vertex_count,
             axis=0,
         )
         interleaved = np.concatenate([vertices, normals, colors], axis=1).astype(
             np.float32,
             copy=False,
         )
-        self._selection_vertex_count = span.count
+        self._selection_vertex_count = vertex_count
         self._selection_vao, self._selection_vbo = self._create_vertex_array(
             self._scene_program,
             interleaved,
@@ -757,3 +799,17 @@ def _qt_wheel_delta(event):
 def _qt_matrix(matrix):
     values = np.asarray(matrix, dtype=np.float32).reshape((4, 4)).reshape(-1)
     return QtGui.QMatrix4x4(*(float(value) for value in values))
+
+
+def _unique_scene_objects(scene_objects):
+    selected = []
+    seen = set()
+    for scene_object in scene_objects or ():
+        if not isinstance(scene_object, SceneObject):
+            continue
+        key = id(scene_object)
+        if key in seen:
+            continue
+        seen.add(key)
+        selected.append(scene_object)
+    return tuple(selected)

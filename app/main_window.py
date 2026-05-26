@@ -60,9 +60,12 @@ class SceneGraphPanel(QtWidgets.QWidget):
         index = self._tree.currentIndex()
         return index.data(SceneGraphRoles.PayloadRole) if index.isValid() else None
 
+    def selected_scene_objects(self):
+        return self._model.scene_objects_for_index(self._tree.currentIndex())
+
     def _on_current_changed(self, current, previous):
         del previous
-        self.nodeSelected.emit(current.data(SceneGraphRoles.PayloadRole))
+        self.nodeSelected.emit(self._model.scene_objects_for_index(current))
 
 
 class RoxyMainWindow(QtWidgets.QMainWindow):
@@ -98,9 +101,12 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
         self._viewport.set_world(world)
 
     def _select_viewport_object(self, payload):
-        self._viewport.set_selected_object(
-            payload if isinstance(payload, SceneObject) else None
-        )
+        if isinstance(payload, SceneObject):
+            self._viewport.set_selected_object(payload)
+        else:
+            scene_objects = tuple(payload or ())
+            active = scene_objects[0] if scene_objects else None
+            self._viewport.set_selected_objects(scene_objects, active_object=active)
 
     def _refresh_viewport_geometry(self, top_left, bottom_right, roles):
         del top_left, bottom_right, roles

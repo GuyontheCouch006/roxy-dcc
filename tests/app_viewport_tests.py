@@ -60,6 +60,19 @@ def test_main_window_scene_graph_selection_updates_viewport():
     assert window.viewport.selected_object is root
 
 
+def test_main_window_parent_selection_updates_viewport_children():
+    _ensure_qapp()
+    world, root, child = _object_hierarchy_world()
+    window = RoxyMainWindow(world)
+
+    root_index = window.scene_graph.model.index_for_payload(root)
+    window.scene_graph.tree.setCurrentIndex(root_index)
+    QtWidgets.QApplication.processEvents()
+
+    assert window.viewport.selected_object is root
+    assert window.viewport.selected_objects == (root, child)
+
+
 def test_main_window_viewport_selection_updates_scene_graph():
     _ensure_qapp()
     world, root = _single_object_world()
@@ -101,6 +114,21 @@ def _single_object_world():
     return world, obj
 
 
+def _object_hierarchy_world():
+    world = World(use_sky=False)
+    root = SceneObject(name="assembly")
+    child = SceneObject(
+        shape=Sphere(1.0),
+        material=Diffuse(Color(0.8, 0.2, 0.2)),
+        translation=Vec3(0, 0, 0),
+        name="wheel",
+    )
+    root.add_child(child)
+    world.add_object(root)
+    world.add_camera(Camera(name="camera1"))
+    return world, root, child
+
+
 def _ensure_qapp():
     return QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
@@ -111,6 +139,7 @@ if __name__ == "__main__":
         test_qt_viewport_selection_signal_is_optional,
         test_main_window_hosts_scene_graph_and_qt_viewport,
         test_main_window_scene_graph_selection_updates_viewport,
+        test_main_window_parent_selection_updates_viewport_children,
         test_main_window_viewport_selection_updates_scene_graph,
         test_main_window_visibility_change_refreshes_viewport_buffers,
     ])
