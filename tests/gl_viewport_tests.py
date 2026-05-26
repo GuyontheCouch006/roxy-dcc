@@ -5,6 +5,7 @@ from rendering.gl_viewport import (
     ViewportCamera,
     _apply_world_translation,
     _build_gizmo_vertices,
+    _scroll_wheel_view_action,
     build_scene_viewport_buffers,
     move_gizmo_drag_delta,
     pick_move_gizmo_axis,
@@ -87,6 +88,32 @@ def test_viewport_camera_dolly_refreshes_clip_planes():
 
     assert camera.near != old_near
     assert camera.far > camera.near
+
+
+def test_scroll_wheel_without_modifiers_pans_for_trackpads():
+    action = _scroll_wheel_view_action(1.0, -2.0)
+
+    assert action[0] == "pan"
+    assert action[1] < 0
+    assert action[2] < 0
+
+
+def test_scroll_wheel_with_zoom_modifiers_dollies():
+    ctrl_action = _scroll_wheel_view_action(0.0, 1.0, ctrl=True)
+    meta_action = _scroll_wheel_view_action(0.0, 1.0, meta=True)
+    alt_action = _scroll_wheel_view_action(0.0, 1.0, alt=True)
+
+    assert ctrl_action == meta_action == alt_action
+    assert ctrl_action[0] == "dolly"
+    assert ctrl_action[1] < 0
+
+
+def test_scroll_wheel_with_shift_orbits():
+    action = _scroll_wheel_view_action(1.0, -1.0, shift=True)
+
+    assert action[0] == "orbit"
+    assert action[1] < 0
+    assert action[2] < 0
 
 
 def test_scene_viewport_buffers_extract_indexed_mesh_vertices_and_color():
@@ -295,6 +322,9 @@ if __name__ == "__main__":
         test_viewport_camera_frame_bounds_centers_camera_on_scene,
         test_viewport_camera_frame_bounds_sets_adaptive_clip_planes,
         test_viewport_camera_dolly_refreshes_clip_planes,
+        test_scroll_wheel_without_modifiers_pans_for_trackpads,
+        test_scroll_wheel_with_zoom_modifiers_dollies,
+        test_scroll_wheel_with_shift_orbits,
         test_scene_viewport_buffers_extract_indexed_mesh_vertices_and_color,
         test_scene_viewport_buffers_resolve_group_materials_per_triangle,
         test_scene_viewport_buffers_do_not_add_dcc_grid_to_selectable_scene,
