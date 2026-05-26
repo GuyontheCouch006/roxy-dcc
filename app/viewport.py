@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import numpy as np
-from PySide6 import QtCore, QtGui, QtOpenGLWidgets, QtWidgets
+from PySide6 import QtCore, QtGui, QtOpenGL, QtOpenGLWidgets, QtWidgets
 
-import moderngl
 from rendering.gl_viewport import (
     GRID_FRAGMENT_SHADER,
     GRID_VERTEX_SHADER,
@@ -15,7 +14,6 @@ from rendering.gl_viewport import (
     _build_gizmo_vertices,
     _build_grid_vertices,
     _copy_matrix,
-    _gl_matrix_bytes,
     _object_gizmo_origin,
     _object_gizmo_size,
     _pinch_view_action,
@@ -26,6 +24,31 @@ from rendering.gl_viewport import (
     pick_scene_object,
 )
 from scene import SceneObject
+
+
+GL_COLOR_BUFFER_BIT = 0x00004000
+GL_DEPTH_BUFFER_BIT = 0x00000100
+GL_DEPTH_TEST = 0x0B71
+GL_SCISSOR_TEST = 0x0C11
+GL_STENCIL_TEST = 0x0B90
+GL_BLEND = 0x0BE2
+GL_FLOAT = 0x1406
+GL_FRONT_AND_BACK = 0x0408
+GL_LINE = 0x1B01
+GL_FILL = 0x1B02
+GL_LINES = 0x0001
+GL_TRIANGLES = 0x0004
+
+
+def configure_default_gl_format():
+    surface_format = QtGui.QSurfaceFormat()
+    surface_format.setVersion(3, 3)
+    surface_format.setProfile(QtGui.QSurfaceFormat.OpenGLContextProfile.CoreProfile)
+    surface_format.setDepthBufferSize(24)
+    QtGui.QSurfaceFormat.setDefaultFormat(surface_format)
+
+
+configure_default_gl_format()
 
 
 class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
@@ -43,12 +66,6 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
 
-        surface_format = QtGui.QSurfaceFormat()
-        surface_format.setVersion(3, 3)
-        surface_format.setProfile(QtGui.QSurfaceFormat.OpenGLContextProfile.CoreProfile)
-        surface_format.setDepthBufferSize(24)
-        self.setFormat(surface_format)
-
         self._world = None
         self._sync_camera = bool(sync_camera)
         self._camera = ViewportCamera()
@@ -57,9 +74,7 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         self._gizmo_mode = "select"
         self._wireframe = False
 
-        self._ctx = None
-        self._qt_framebuffer = None
-        self._qt_framebuffer_id = None
+        self._gl = None
         self._scene_program = None
         self._grid_program = None
         self._scene_vbo = None
@@ -231,16 +246,16 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         self._move_drag = None
 
     def initializeGL(self):
-        self._ctx = moderngl.create_context(require=330)
-        self._use_qt_framebuffer()
-        self._ctx.enable(moderngl.DEPTH_TEST)
-        self._scene_program = self._ctx.program(
-            vertex_shader=SCENE_VERTEX_SHADER,
-            fragment_shader=SCENE_FRAGMENT_SHADER,
+        self._gl = self.context().functions()
+        self._gl.initializeOpenGLFunctions()
+        self._gl.glEnable(GL_DEPTH_TEST)
+        self._scene_program = self._create_program(
+            SCENE_VERTEX_SHADER,
+            SCENE_FRAGMENT_SHADER,
         )
-        self._grid_program = self._ctx.program(
-            vertex_shader=GRID_VERTEX_SHADER,
-            fragment_shader=GRID_FRAGMENT_SHADER,
+        self._grid_program = self._create_program(
+            GRID_VERTEX_SHADER,
+            GRID_FRAGMENT_SHADER,
         )
         self._upload_grid_buffers()
         self._upload_scene_buffers()
@@ -248,50 +263,70 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         self._upload_gizmo_buffers()
 
     def resizeGL(self, width, height):
-        if self._ctx is None:
+        if self._gl is None:
             return
         del width, height
-        self._qt_framebuffer = None
-        self._qt_framebuffer_id = None
-        self._use_qt_framebuffer()
+        self.update()
 
     def paintGL(self):
-        if self._ctx is None:
+        if self._gl is None:
             return
-        target = self._use_qt_framebuffer()
-        if target is None:
-            return
-        self._ctx.enable(moderngl.DEPTH_TEST)
-        target.clear(0.035, 0.038, 0.044, 1.0)
+        width, height = self._physical_viewport_size()
+        self._gl.glViewport(0, 0, width, height)
+        self._gl.glDisable(GL_SCISSOR_TEST)
+        self._gl.glDisable(GL_STENCIL_TEST)
+        self._gl.glDisable(GL_BLEND)
+        self._gl.glEnable(GL_DEPTH_TEST)
+        self._gl.glClearColor(0.035, 0.038, 0.044, 1.0)
+        self._gl.glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         self._write_scene_matrices(self._scene_program)
         self._write_scene_matrices(self._grid_program)
 
         if self._grid_vao is not None:
-            self._grid_vao.render(moderngl.LINES, vertices=self._grid_vertex_count)
+            self._render_vertices(
+                self._grid_program,
+                self._grid_vao,
+                GL_LINES,
+                self._grid_vertex_count,
+            )
 
         if self._scene_vao is not None and self._scene_buffers is not None:
-            self._scene_program["light_direction"].value = (0.35, 0.82, 0.44)
-            self._ctx.wireframe = self._wireframe
-            self._scene_vao.render(
-                moderngl.TRIANGLES,
-                vertices=self._scene_buffers.vertex_count,
+            self._scene_program.bind()
+            self._scene_program.setUniformValue(
+                "light_direction",
+                QtGui.QVector3D(0.35, 0.82, 0.44),
             )
-            self._ctx.wireframe = False
+            self._scene_program.release()
+            self._set_wireframe(self._wireframe)
+            self._render_vertices(
+                self._scene_program,
+                self._scene_vao,
+                GL_TRIANGLES,
+                self._scene_buffers.vertex_count,
+            )
+            self._set_wireframe(False)
 
         if self._selection_vao is not None:
-            self._ctx.disable(moderngl.DEPTH_TEST)
-            self._ctx.wireframe = True
-            self._selection_vao.render(
-                moderngl.TRIANGLES,
-                vertices=self._selection_vertex_count,
+            self._gl.glDisable(GL_DEPTH_TEST)
+            self._set_wireframe(True)
+            self._render_vertices(
+                self._scene_program,
+                self._selection_vao,
+                GL_TRIANGLES,
+                self._selection_vertex_count,
             )
-            self._ctx.wireframe = False
-            self._ctx.enable(moderngl.DEPTH_TEST)
+            self._set_wireframe(False)
+            self._gl.glEnable(GL_DEPTH_TEST)
 
         if self._gizmo_vao is not None:
-            self._ctx.disable(moderngl.DEPTH_TEST)
-            self._gizmo_vao.render(moderngl.LINES, vertices=self._gizmo_vertex_count)
-            self._ctx.enable(moderngl.DEPTH_TEST)
+            self._gl.glDisable(GL_DEPTH_TEST)
+            self._render_vertices(
+                self._grid_program,
+                self._gizmo_vao,
+                GL_LINES,
+                self._gizmo_vertex_count,
+            )
+            self._gl.glEnable(GL_DEPTH_TEST)
 
     def mousePressEvent(self, event):
         self.setFocus()
@@ -391,7 +426,8 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         event.accept()
 
     def event(self, event):
-        if event.type() == QtCore.QEvent.Type.NativeGesture:
+        event_type = event.type() if callable(getattr(event, "type", None)) else None
+        if event_type == QtCore.QEvent.Type.NativeGesture:
             gesture_type = event.gestureType()
             if gesture_type == QtCore.Qt.NativeGestureType.ZoomNativeGesture:
                 if self._apply_view_action(_pinch_view_action(event.value())):
@@ -445,42 +481,89 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         self._camera.apply_to_camera(self._world.active_camera)
 
     def _write_scene_matrices(self, program):
-        width, height = self._framebuffer_size()
+        if program is None:
+            return
+        width, height = self._physical_viewport_size()
         aspect = width / height if height else 1.0
-        program["view"].write(_gl_matrix_bytes(self._camera.view_matrix()))
-        program["projection"].write(_gl_matrix_bytes(self._camera.projection_matrix(aspect)))
+        program.bind()
+        program.setUniformValue("view", _qt_matrix(self._camera.view_matrix()))
+        program.setUniformValue(
+            "projection",
+            _qt_matrix(self._camera.projection_matrix(aspect)),
+        )
+        program.release()
 
-    def _use_qt_framebuffer(self):
-        if self._ctx is None:
-            return None
-        framebuffer_id = int(self.defaultFramebufferObject())
-        if (
-            self._qt_framebuffer is None
-            or self._qt_framebuffer_id != framebuffer_id
+    def _create_program(self, vertex_shader, fragment_shader):
+        program = QtOpenGL.QOpenGLShaderProgram()
+        if not program.addShaderFromSourceCode(
+            QtOpenGL.QOpenGLShader.ShaderTypeBit.Vertex,
+            vertex_shader,
         ):
-            self._qt_framebuffer = self._ctx.detect_framebuffer(framebuffer_id)
-            self._qt_framebuffer_id = framebuffer_id
+            raise RuntimeError(f"Vertex shader compile failed: {program.log()}")
+        if not program.addShaderFromSourceCode(
+            QtOpenGL.QOpenGLShader.ShaderTypeBit.Fragment,
+            fragment_shader,
+        ):
+            raise RuntimeError(f"Fragment shader compile failed: {program.log()}")
+        if not program.link():
+            raise RuntimeError(f"Shader link failed: {program.log()}")
+        return program
 
-        width, height = self._framebuffer_size()
-        viewport = (0, 0, width, height)
-        self._qt_framebuffer.use()
-        self._qt_framebuffer.viewport = viewport
-        self._ctx.viewport = viewport
-        return self._qt_framebuffer
+    def _render_vertices(self, program, vao, mode, vertex_count):
+        if self._gl is None or program is None or vao is None or vertex_count <= 0:
+            return
+        program.bind()
+        vao.bind()
+        self._gl.glDrawArrays(mode, 0, int(vertex_count))
+        vao.release()
+        program.release()
 
-    def _framebuffer_size(self):
-        if self._qt_framebuffer is not None:
-            width, height = self._qt_framebuffer.size
-            if width > 0 and height > 0:
-                return int(width), int(height)
+    def _set_wireframe(self, enabled):
+        if self._gl is None or not hasattr(self._gl, "glPolygonMode"):
+            return
+        self._gl.glPolygonMode(GL_FRONT_AND_BACK, GL_LINE if enabled else GL_FILL)
+
+    def _physical_viewport_size(self):
         ratio = max(float(self.devicePixelRatioF()), 1.0)
         return (
             max(int(round(self.width() * ratio)), 1),
             max(int(round(self.height() * ratio)), 1),
         )
 
+    def _create_vertex_array(self, program, vertices, attributes):
+        vao = QtOpenGL.QOpenGLVertexArrayObject()
+        if not vao.create():
+            raise RuntimeError("Could not create OpenGL vertex array object")
+        vao.bind()
+
+        vbo = QtOpenGL.QOpenGLBuffer(QtOpenGL.QOpenGLBuffer.Type.VertexBuffer)
+        if not vbo.create():
+            vao.release()
+            vao.destroy()
+            raise RuntimeError("Could not create OpenGL vertex buffer")
+        vbo.bind()
+        vbo.allocate(vertices.tobytes(), vertices.nbytes)
+
+        program.bind()
+        for name, component_count, offset, stride in attributes:
+            location = program.attributeLocation(name)
+            if location < 0:
+                continue
+            program.enableAttributeArray(location)
+            program.setAttributeBuffer(
+                location,
+                GL_FLOAT,
+                int(offset),
+                int(component_count),
+                int(stride),
+            )
+        program.release()
+        vbo.release()
+        vao.release()
+        return vao, vbo
+
     def _upload_all_if_ready(self):
-        if self._ctx is None:
+        if self._gl is None:
             return
         self.makeCurrent()
         try:
@@ -491,7 +574,7 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             self.doneCurrent()
 
     def _upload_selection_if_ready(self):
-        if self._ctx is None:
+        if self._gl is None:
             return
         self.makeCurrent()
         try:
@@ -500,7 +583,7 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             self.doneCurrent()
 
     def _upload_gizmo_if_ready(self):
-        if self._ctx is None:
+        if self._gl is None:
             return
         self.makeCurrent()
         try:
@@ -517,10 +600,13 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
 
         grid = _build_grid_vertices()
         self._grid_vertex_count = len(grid)
-        self._grid_vbo = self._ctx.buffer(grid.tobytes())
-        self._grid_vao = self._ctx.vertex_array(
+        self._grid_vao, self._grid_vbo = self._create_vertex_array(
             self._grid_program,
-            [(self._grid_vbo, "3f 3f", "in_position", "in_color")],
+            grid.astype(np.float32, copy=False),
+            (
+                ("in_position", 3, 0, 6 * 4),
+                ("in_color", 3, 3 * 4, 6 * 4),
+            ),
         )
 
     def _upload_scene_buffers(self):
@@ -540,10 +626,14 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             ],
             axis=1,
         ).astype(np.float32, copy=False)
-        self._scene_vbo = self._ctx.buffer(interleaved.tobytes())
-        self._scene_vao = self._ctx.vertex_array(
+        self._scene_vao, self._scene_vbo = self._create_vertex_array(
             self._scene_program,
-            [(self._scene_vbo, "3f 3f 3f", "in_position", "in_normal", "in_color")],
+            interleaved,
+            (
+                ("in_position", 3, 0, 9 * 4),
+                ("in_normal", 3, 3 * 4, 9 * 4),
+                ("in_color", 3, 6 * 4, 9 * 4),
+            ),
         )
 
     def _upload_selection_buffers(self):
@@ -578,10 +668,14 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             copy=False,
         )
         self._selection_vertex_count = span.count
-        self._selection_vbo = self._ctx.buffer(interleaved.tobytes())
-        self._selection_vao = self._ctx.vertex_array(
+        self._selection_vao, self._selection_vbo = self._create_vertex_array(
             self._scene_program,
-            [(self._selection_vbo, "3f 3f 3f", "in_position", "in_normal", "in_color")],
+            interleaved,
+            (
+                ("in_position", 3, 0, 9 * 4),
+                ("in_normal", 3, 3 * 4, 9 * 4),
+                ("in_color", 3, 6 * 4, 9 * 4),
+            ),
         )
 
     def _upload_gizmo_buffers(self):
@@ -606,14 +700,17 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             return
 
         self._gizmo_vertex_count = len(vertices)
-        self._gizmo_vbo = self._ctx.buffer(vertices.tobytes())
-        self._gizmo_vao = self._ctx.vertex_array(
+        self._gizmo_vao, self._gizmo_vbo = self._create_vertex_array(
             self._grid_program,
-            [(self._gizmo_vbo, "3f 3f", "in_position", "in_color")],
+            vertices.astype(np.float32, copy=False),
+            (
+                ("in_position", 3, 0, 6 * 4),
+                ("in_color", 3, 3 * 4, 6 * 4),
+            ),
         )
 
     def _release_gl_resources(self):
-        if self._ctx is None:
+        if self._gl is None:
             return
         self.makeCurrent()
         try:
@@ -632,14 +729,19 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
                 self._release(resource)
         finally:
             self.doneCurrent()
-        self._ctx = None
+        self._gl = None
 
     @staticmethod
     def _release(resource):
         if resource is None:
             return
         try:
-            resource.release()
+            if hasattr(resource, "destroy"):
+                resource.destroy()
+            elif hasattr(resource, "removeAllShaders"):
+                resource.removeAllShaders()
+            elif hasattr(resource, "release"):
+                resource.release()
         except Exception:
             pass
 
@@ -650,3 +752,8 @@ def _qt_wheel_delta(event):
         return pixel_delta.x() / 120.0, pixel_delta.y() / 120.0
     angle_delta = event.angleDelta()
     return angle_delta.x() / 120.0, angle_delta.y() / 120.0
+
+
+def _qt_matrix(matrix):
+    values = np.asarray(matrix, dtype=np.float32).reshape((4, 4)).reshape(-1)
+    return QtGui.QMatrix4x4(*(float(value) for value in values))
