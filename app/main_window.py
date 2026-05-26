@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+import os
+import sys
+
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
 from PySide6 import QtCore, QtWidgets
 
 from app.scene_graph import SceneGraphModel, SceneGraphRoles
