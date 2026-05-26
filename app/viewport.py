@@ -58,6 +58,8 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         self._wireframe = False
 
         self._ctx = None
+        self._qt_framebuffer = None
+        self._qt_framebuffer_id = None
         self._scene_program = None
         self._grid_program = None
         self._scene_vbo = None
@@ -230,6 +232,7 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
 
     def initializeGL(self):
         self._ctx = moderngl.create_context(require=330)
+        self._use_qt_framebuffer()
         self._ctx.enable(moderngl.DEPTH_TEST)
         self._scene_program = self._ctx.program(
             vertex_shader=SCENE_VERTEX_SHADER,
@@ -245,15 +248,20 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         self._upload_gizmo_buffers()
 
     def resizeGL(self, width, height):
-        if self._ctx is not None:
-            self._ctx.viewport = (0, 0, max(int(width), 1), max(int(height), 1))
+        if self._ctx is None:
+            return
+        self._qt_framebuffer = None
+        self._qt_framebuffer_id = None
+        self._use_qt_framebuffer(max(int(width), 1), max(int(height), 1))
 
     def paintGL(self):
         if self._ctx is None:
             return
-        self._ctx.viewport = (0, 0, max(self.width(), 1), max(self.height(), 1))
+        target = self._use_qt_framebuffer(max(self.width(), 1), max(self.height(), 1))
+        if target is None:
+            return
         self._ctx.enable(moderngl.DEPTH_TEST)
-        self._ctx.clear(0.035, 0.038, 0.044, 1.0)
+        target.clear(0.035, 0.038, 0.044, 1.0)
         self._write_scene_matrices(self._scene_program)
         self._write_scene_matrices(self._grid_program)
 
@@ -439,6 +447,25 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         aspect = self.width() / self.height() if self.height() else 1.0
         program["view"].write(_gl_matrix_bytes(self._camera.view_matrix()))
         program["projection"].write(_gl_matrix_bytes(self._camera.projection_matrix(aspect)))
+
+    def _use_qt_framebuffer(self, width=None, height=None):
+        if self._ctx is None:
+            return None
+        framebuffer_id = int(self.defaultFramebufferObject())
+        if (
+            self._qt_framebuffer is None
+            or self._qt_framebuffer_id != framebuffer_id
+        ):
+            self._qt_framebuffer = self._ctx.detect_framebuffer(framebuffer_id)
+            self._qt_framebuffer_id = framebuffer_id
+
+        width = max(int(width if width is not None else self.width()), 1)
+        height = max(int(height if height is not None else self.height()), 1)
+        viewport = (0, 0, width, height)
+        self._qt_framebuffer.use()
+        self._qt_framebuffer.viewport = viewport
+        self._ctx.viewport = viewport
+        return self._qt_framebuffer
 
     def _upload_all_if_ready(self):
         if self._ctx is None:
