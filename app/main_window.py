@@ -3,6 +3,8 @@ from __future__ import annotations
 from PySide6 import QtCore, QtWidgets
 
 from app.scene_graph import SceneGraphModel, SceneGraphRoles
+from app.viewport import QtGLViewport
+from scene import SceneObject
 
 
 class SceneGraphPanel(QtWidgets.QWidget):
@@ -41,6 +43,13 @@ class SceneGraphPanel(QtWidgets.QWidget):
         self._model.set_world(world)
         self._tree.expandToDepth(1)
 
+    def select_payload(self, payload):
+        index = self._model.index_for_payload(payload)
+        if not index.isValid():
+            self._tree.clearSelection()
+            return
+        self._tree.setCurrentIndex(index)
+
     def selected_payload(self):
         index = self._tree.currentIndex()
         return index.data(SceneGraphRoles.PayloadRole) if index.isValid() else None
@@ -57,22 +66,39 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
         self.resize(1280, 820)
 
         self._scene_graph = SceneGraphPanel(world, self)
+        self._viewport = QtGLViewport(world, self)
+
         scene_graph_dock = QtWidgets.QDockWidget("Scene Graph", self)
         scene_graph_dock.setObjectName("sceneGraphDock")
         scene_graph_dock.setWidget(self._scene_graph)
         self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, scene_graph_dock)
 
-        self._central = QtWidgets.QFrame(self)
-        self._central.setObjectName("viewportHost")
-        self._central.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
-        self.setCentralWidget(self._central)
+        self.setCentralWidget(self._viewport)
+
+        self._scene_graph.nodeSelected.connect(self._select_viewport_object)
+        self._scene_graph.model.dataChanged.connect(self._refresh_viewport_geometry)
+        self._viewport.objectSelected.connect(self._scene_graph.select_payload)
 
     @property
     def scene_graph(self):
         return self._scene_graph
 
+    @property
+    def viewport(self):
+        return self._viewport
+
     def set_world(self, world):
         self._scene_graph.set_world(world)
+        self._viewport.set_world(world)
+
+    def _select_viewport_object(self, payload):
+        self._viewport.set_selected_object(
+            payload if isinstance(payload, SceneObject) else None
+        )
+
+    def _refresh_viewport_geometry(self, top_left, bottom_right, roles):
+        del top_left, bottom_right, roles
+        self._viewport.refresh_scene_geometry()
 
 
 def run(world=None):
