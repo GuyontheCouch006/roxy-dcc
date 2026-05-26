@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from PySide6 import QtCore
+from PySide6 import QtCore, QtGui
 
 
 class SceneGraphRoles:
@@ -49,7 +49,7 @@ class SceneGraphNode:
 class SceneGraphModel(QtCore.QAbstractItemModel):
     """Qt item model that presents a scene.World as an outliner tree."""
 
-    COLUMNS = ("Name", "Type", "Details")
+    COLUMNS = ("Name",)
 
     def __init__(self, world=None, parent=None):
         super().__init__(parent)
@@ -102,17 +102,13 @@ class SceneGraphModel(QtCore.QAbstractItemModel):
             return None
 
         node = index.internalPointer()
-        column = index.column()
 
         if role == QtCore.Qt.ItemDataRole.DisplayRole:
-            if column == 0:
-                return node.name
-            if column == 1:
-                return _display_kind(node.kind)
-            if column == 2:
-                return node.detail
+            return node.name
+        if role == QtCore.Qt.ItemDataRole.DecorationRole:
+            return _icon_for_kind(node.kind)
         if role == QtCore.Qt.ItemDataRole.ToolTipRole:
-            return node.path
+            return _node_tooltip(node)
         if role == SceneGraphRoles.NodeRole:
             return node
         if role == SceneGraphRoles.PayloadRole:
@@ -123,7 +119,7 @@ class SceneGraphModel(QtCore.QAbstractItemModel):
             return node.path
         if (
             role == QtCore.Qt.ItemDataRole.CheckStateRole
-            and column == 0
+            and index.column() == 0
             and node.kind == "object"
         ):
             return (
@@ -344,3 +340,96 @@ def _display_kind(kind):
 
 def _check_state_value(value):
     return getattr(value, "value", value)
+
+
+_ICON_CACHE = {}
+
+
+def _icon_for_kind(kind):
+    if QtGui.QGuiApplication.instance() is None:
+        return None
+    if kind not in _ICON_CACHE:
+        _ICON_CACHE[kind] = _build_icon(kind)
+    return _ICON_CACHE[kind]
+
+
+def _build_icon(kind):
+    size = 18
+    image = QtGui.QImage(size, size, QtGui.QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(QtCore.Qt.GlobalColor.transparent)
+
+    painter = QtGui.QPainter(image)
+    painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+
+    color = _icon_color(kind)
+    pen = QtGui.QPen(color.darker(135), 1.4)
+    painter.setPen(pen)
+    painter.setBrush(QtGui.QBrush(color))
+
+    if kind == "world":
+        painter.drawEllipse(QtCore.QRectF(3.0, 3.0, 12.0, 12.0))
+        painter.setPen(QtGui.QPen(color.lighter(160), 1.0))
+        painter.drawArc(QtCore.QRectF(5.0, 3.0, 8.0, 12.0), 0, 360 * 16)
+        painter.drawLine(QtCore.QPointF(3.5, 9.0), QtCore.QPointF(14.5, 9.0))
+    elif kind == "section":
+        painter.drawRoundedRect(QtCore.QRectF(2.5, 5.0, 13.0, 9.5), 2.0, 2.0)
+        painter.drawRect(QtCore.QRectF(3.5, 3.5, 5.0, 3.0))
+    elif kind == "object":
+        points = [
+            QtCore.QPointF(9.0, 2.5),
+            QtCore.QPointF(14.5, 5.8),
+            QtCore.QPointF(14.5, 12.2),
+            QtCore.QPointF(9.0, 15.5),
+            QtCore.QPointF(3.5, 12.2),
+            QtCore.QPointF(3.5, 5.8),
+        ]
+        painter.drawPolygon(QtGui.QPolygonF(points))
+        painter.setPen(QtGui.QPen(color.darker(155), 1.0))
+        painter.drawLine(QtCore.QPointF(9.0, 2.5), QtCore.QPointF(9.0, 15.5))
+        painter.drawLine(QtCore.QPointF(3.5, 5.8), QtCore.QPointF(14.5, 12.2))
+    elif kind == "shape":
+        painter.drawEllipse(QtCore.QRectF(3.0, 4.0, 12.0, 10.0))
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QtCore.QRectF(5.5, 5.5, 7.0, 7.0))
+    elif kind == "camera":
+        painter.drawRoundedRect(QtCore.QRectF(2.5, 5.5, 9.5, 7.0), 1.5, 1.5)
+        painter.drawPolygon(
+            QtGui.QPolygonF([
+                QtCore.QPointF(12.0, 7.0),
+                QtCore.QPointF(16.0, 5.5),
+                QtCore.QPointF(16.0, 12.5),
+                QtCore.QPointF(12.0, 11.0),
+            ])
+        )
+    elif kind == "light":
+        painter.drawEllipse(QtCore.QRectF(5.2, 4.0, 7.6, 7.6))
+        painter.drawLine(QtCore.QPointF(9.0, 1.8), QtCore.QPointF(9.0, 3.2))
+        painter.drawLine(QtCore.QPointF(9.0, 12.8), QtCore.QPointF(9.0, 16.2))
+        painter.drawLine(QtCore.QPointF(2.0, 8.0), QtCore.QPointF(4.0, 8.0))
+        painter.drawLine(QtCore.QPointF(14.0, 8.0), QtCore.QPointF(16.0, 8.0))
+    else:
+        painter.drawRoundedRect(QtCore.QRectF(4.0, 4.0, 10.0, 10.0), 2.0, 2.0)
+
+    painter.end()
+    return QtGui.QIcon(QtGui.QPixmap.fromImage(image))
+
+
+def _icon_color(kind):
+    colors = {
+        "world": QtGui.QColor("#5aa7ff"),
+        "section": QtGui.QColor("#88939f"),
+        "object": QtGui.QColor("#f2b84b"),
+        "shape": QtGui.QColor("#7fd48b"),
+        "camera": QtGui.QColor("#b48cff"),
+        "light": QtGui.QColor("#ffd95a"),
+    }
+    return colors.get(kind, QtGui.QColor("#b8c0cc"))
+
+
+def _node_tooltip(node):
+    parts = [_display_kind(node.kind) or node.name]
+    if node.detail:
+        parts.append(node.detail)
+    if node.path:
+        parts.append(node.path)
+    return "\n".join(parts)
