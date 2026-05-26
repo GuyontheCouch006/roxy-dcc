@@ -137,6 +137,13 @@ def test_scene_viewport_buffers_resolve_group_materials_per_triangle():
     assert np.allclose(buffers.colors[3:6], np.array([[0, 1, 0]] * 3, dtype=np.float32))
 
 
+def test_scene_viewport_buffers_do_not_add_dcc_grid_to_selectable_scene():
+    buffers = build_scene_viewport_buffers(World(use_sky=False))
+
+    assert buffers.triangle_count == 0
+    assert buffers.object_spans == ()
+
+
 def test_pick_scene_object_returns_nearest_object_under_cursor():
     near_obj = _pickable_triangle_object("near", z=0.0)
     far_obj = _pickable_triangle_object("far", z=-2.0)
@@ -160,7 +167,7 @@ def test_pick_scene_object_skips_non_selectable_objects():
     assert result is None
 
 
-def test_pick_scene_object_skips_infinite_grid_like_planes():
+def test_pick_scene_object_allows_user_authored_infinite_planes():
     plane = SceneObject(
         shape=Plane(normal=Vec3(0, 1, 0)),
         material=Diffuse(Color(0.5, 0.5, 0.5)),
@@ -171,7 +178,8 @@ def test_pick_scene_object_skips_infinite_grid_like_planes():
 
     result = pick_scene_object(world, camera, 50, 70, 100, 100)
 
-    assert result is None
+    assert result is not None
+    assert result.scene_object is plane
 
 
 def test_pick_move_gizmo_axis_hits_projected_axis_line():
@@ -289,9 +297,10 @@ if __name__ == "__main__":
         test_viewport_camera_dolly_refreshes_clip_planes,
         test_scene_viewport_buffers_extract_indexed_mesh_vertices_and_color,
         test_scene_viewport_buffers_resolve_group_materials_per_triangle,
+        test_scene_viewport_buffers_do_not_add_dcc_grid_to_selectable_scene,
         test_pick_scene_object_returns_nearest_object_under_cursor,
         test_pick_scene_object_skips_non_selectable_objects,
-        test_pick_scene_object_skips_infinite_grid_like_planes,
+        test_pick_scene_object_allows_user_authored_infinite_planes,
         test_pick_move_gizmo_axis_hits_projected_axis_line,
         test_move_gizmo_drag_delta_tracks_screen_projected_axis,
         test_apply_world_translation_updates_component_transform,

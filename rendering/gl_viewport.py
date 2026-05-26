@@ -734,6 +734,7 @@ class GLViewport:
         )
 
     def _init_grid_resources(self):
+        # Viewport-only DCC grid: never part of World, picking, or rendering.
         self._grid_program = self._ctx.program(
             vertex_shader=GRID_VERTEX_SHADER,
             fragment_shader=GRID_FRAGMENT_SHADER,
@@ -946,9 +947,6 @@ def _pick_object_shapes(obj, world_ray):
     closest = None
 
     for shape in obj.shapes:
-        if shape.is_infinite or shape.local_bounds() is None:
-            continue
-
         hit = shape.intersect(local_ray)
         if hit is None:
             continue
