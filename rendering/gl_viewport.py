@@ -123,6 +123,10 @@ QUAD_VERTICES = np.array([
     -1.0,  1.0,  0.0, 0.0,
 ], dtype="f4")
 
+TRACKPAD_PAN_PIXELS = 56.0
+TRACKPAD_DOLLY_PIXELS = 120.0
+TRACKPAD_ORBIT_PIXELS = 24.0
+
 
 @dataclass
 class ObjectVertexSpan:
@@ -626,8 +630,7 @@ class GLViewport:
                     self._mouse_down_pos = None
                     self.end_move_gizmo_drag()
             elif event.type == pygame.MOUSEWHEEL:
-                self._camera.dolly(-event.y * 120)
-                self._sync_world_camera()
+                self._handle_wheel(event)
             elif event.type == pygame.MOUSEMOTION and self._mode == "scene":
                 if self._mouse_down_pos is not None:
                     dx = event.pos[0] - self._mouse_down_pos[0]
@@ -903,6 +906,25 @@ class GLViewport:
             self._camera.dolly(dy)
         self._sync_world_camera()
 
+    def _handle_wheel(self, event):
+        wheel_x, wheel_y = _wheel_delta(event)
+        mods = pygame.key.get_mods()
+        action = _scroll_wheel_view_action(
+            wheel_x,
+            wheel_y,
+            shift=bool(mods & pygame.KMOD_SHIFT),
+            ctrl=bool(mods & pygame.KMOD_CTRL),
+            alt=bool(mods & pygame.KMOD_ALT),
+            meta=bool(mods & pygame.KMOD_META),
+        )
+        if action[0] == "pan":
+            self._camera.pan(action[1], action[2], self._width, self._height)
+        elif action[0] == "dolly":
+            self._camera.dolly(action[1])
+        elif action[0] == "orbit":
+            self._camera.orbit(action[1], action[2])
+        self._sync_world_camera()
+
     def _write_scene_matrices(self, program):
         aspect = self._width / self._height if self._height else 1.0
         program["view"].write(_gl_matrix_bytes(self._camera.view_matrix()))
@@ -930,6 +952,29 @@ def pick_scene_object(world, viewport_camera, screen_x, screen_y, width, height)
             closest = result
 
     return closest
+
+
+def _scroll_wheel_view_action(wheel_x, wheel_y, shift=False, ctrl=False, alt=False, meta=False):
+    if ctrl or alt or meta:
+        return ("dolly", -float(wheel_y) * TRACKPAD_DOLLY_PIXELS)
+    if shift:
+        return (
+            "orbit",
+            -float(wheel_x) * TRACKPAD_ORBIT_PIXELS,
+            float(wheel_y) * TRACKPAD_ORBIT_PIXELS,
+        )
+    return (
+        "pan",
+        -float(wheel_x) * TRACKPAD_PAN_PIXELS,
+        float(wheel_y) * TRACKPAD_PAN_PIXELS,
+    )
+
+
+def _wheel_delta(event):
+    return (
+        float(getattr(event, "precise_x", getattr(event, "x", 0.0))),
+        float(getattr(event, "precise_y", getattr(event, "y", 0.0))),
+    )
 
 
 def _pick_object_shapes(obj, world_ray):
