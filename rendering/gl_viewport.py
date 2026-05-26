@@ -946,6 +946,9 @@ def _pick_object_shapes(obj, world_ray):
     closest = None
 
     for shape in obj.shapes:
+        if shape.is_infinite or shape.local_bounds() is None:
+            continue
+
         hit = shape.intersect(local_ray)
         if hit is None:
             continue

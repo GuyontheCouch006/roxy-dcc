@@ -10,7 +10,7 @@ from rendering.gl_viewport import (
     pick_move_gizmo_axis,
     pick_scene_object,
 )
-from scene import Diffuse, IndexedMesh, SceneObject, Shape, World
+from scene import Diffuse, IndexedMesh, Plane, SceneObject, Shape, World
 from tests.utils import approx_eq, run_tests, vec3_approx_eq
 
 
@@ -160,6 +160,20 @@ def test_pick_scene_object_skips_non_selectable_objects():
     assert result is None
 
 
+def test_pick_scene_object_skips_infinite_grid_like_planes():
+    plane = SceneObject(
+        shape=Plane(normal=Vec3(0, 1, 0)),
+        material=Diffuse(Color(0.5, 0.5, 0.5)),
+        name="ground",
+    )
+    world = World(objects=[plane], use_sky=False)
+    camera = ViewportCamera(target=(0, 0, 0), distance=5, yaw=0, pitch=-45)
+
+    result = pick_scene_object(world, camera, 50, 70, 100, 100)
+
+    assert result is None
+
+
 def test_pick_move_gizmo_axis_hits_projected_axis_line():
     world = _single_triangle_world()
     obj = world.objects[0]
@@ -277,6 +291,7 @@ if __name__ == "__main__":
         test_scene_viewport_buffers_resolve_group_materials_per_triangle,
         test_pick_scene_object_returns_nearest_object_under_cursor,
         test_pick_scene_object_skips_non_selectable_objects,
+        test_pick_scene_object_skips_infinite_grid_like_planes,
         test_pick_move_gizmo_axis_hits_projected_axis_line,
         test_move_gizmo_drag_delta_tracks_screen_projected_axis,
         test_apply_world_translation_updates_component_transform,
