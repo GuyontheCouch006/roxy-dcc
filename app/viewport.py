@@ -250,14 +250,15 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
     def resizeGL(self, width, height):
         if self._ctx is None:
             return
+        del width, height
         self._qt_framebuffer = None
         self._qt_framebuffer_id = None
-        self._use_qt_framebuffer(max(int(width), 1), max(int(height), 1))
+        self._use_qt_framebuffer()
 
     def paintGL(self):
         if self._ctx is None:
             return
-        target = self._use_qt_framebuffer(max(self.width(), 1), max(self.height(), 1))
+        target = self._use_qt_framebuffer()
         if target is None:
             return
         self._ctx.enable(moderngl.DEPTH_TEST)
@@ -444,11 +445,12 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         self._camera.apply_to_camera(self._world.active_camera)
 
     def _write_scene_matrices(self, program):
-        aspect = self.width() / self.height() if self.height() else 1.0
+        width, height = self._framebuffer_size()
+        aspect = width / height if height else 1.0
         program["view"].write(_gl_matrix_bytes(self._camera.view_matrix()))
         program["projection"].write(_gl_matrix_bytes(self._camera.projection_matrix(aspect)))
 
-    def _use_qt_framebuffer(self, width=None, height=None):
+    def _use_qt_framebuffer(self):
         if self._ctx is None:
             return None
         framebuffer_id = int(self.defaultFramebufferObject())
@@ -459,13 +461,23 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             self._qt_framebuffer = self._ctx.detect_framebuffer(framebuffer_id)
             self._qt_framebuffer_id = framebuffer_id
 
-        width = max(int(width if width is not None else self.width()), 1)
-        height = max(int(height if height is not None else self.height()), 1)
+        width, height = self._framebuffer_size()
         viewport = (0, 0, width, height)
         self._qt_framebuffer.use()
         self._qt_framebuffer.viewport = viewport
         self._ctx.viewport = viewport
         return self._qt_framebuffer
+
+    def _framebuffer_size(self):
+        if self._qt_framebuffer is not None:
+            width, height = self._qt_framebuffer.size
+            if width > 0 and height > 0:
+                return int(width), int(height)
+        ratio = max(float(self.devicePixelRatioF()), 1.0)
+        return (
+            max(int(round(self.width() * ratio)), 1),
+            max(int(round(self.height() * ratio)), 1),
+        )
 
     def _upload_all_if_ready(self):
         if self._ctx is None:
