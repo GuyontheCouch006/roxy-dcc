@@ -124,8 +124,8 @@ QUAD_VERTICES = np.array([
 ], dtype="f4")
 
 TRACKPAD_PAN_PIXELS = 56.0
-TRACKPAD_DOLLY_PIXELS = 120.0
 TRACKPAD_ORBIT_PIXELS = 24.0
+TRACKPAD_PINCH_DOLLY_PIXELS = 1800.0
 
 
 @dataclass
@@ -631,6 +631,11 @@ class GLViewport:
                     self.end_move_gizmo_drag()
             elif event.type == pygame.MOUSEWHEEL:
                 self._handle_wheel(event)
+            elif (
+                getattr(pygame, "MULTIGESTURE", None) is not None
+                and event.type == pygame.MULTIGESTURE
+            ):
+                self._handle_multigesture(event)
             elif event.type == pygame.MOUSEMOTION and self._mode == "scene":
                 if self._mouse_down_pos is not None:
                     dx = event.pos[0] - self._mouse_down_pos[0]
@@ -917,13 +922,25 @@ class GLViewport:
             alt=bool(mods & pygame.KMOD_ALT),
             meta=bool(mods & pygame.KMOD_META),
         )
+        self._apply_view_action(action)
+
+    def _handle_multigesture(self, event):
+        action = _pinch_view_action(getattr(event, "pinched", 0.0))
+        self._apply_view_action(action)
+
+    def _apply_view_action(self, action):
+        moved = False
         if action[0] == "pan":
             self._camera.pan(action[1], action[2], self._width, self._height)
+            moved = True
         elif action[0] == "dolly":
             self._camera.dolly(action[1])
+            moved = True
         elif action[0] == "orbit":
             self._camera.orbit(action[1], action[2])
-        self._sync_world_camera()
+            moved = True
+        if moved:
+            self._sync_world_camera()
 
     def _write_scene_matrices(self, program):
         aspect = self._width / self._height if self._height else 1.0
@@ -955,19 +972,30 @@ def pick_scene_object(world, viewport_camera, screen_x, screen_y, width, height)
 
 
 def _scroll_wheel_view_action(wheel_x, wheel_y, shift=False, ctrl=False, alt=False, meta=False):
-    if ctrl or alt or meta:
-        return ("dolly", -float(wheel_y) * TRACKPAD_DOLLY_PIXELS)
-    if shift:
+    wheel_x = float(wheel_x)
+    wheel_y = float(wheel_y)
+    if alt:
         return (
             "orbit",
-            -float(wheel_x) * TRACKPAD_ORBIT_PIXELS,
-            float(wheel_y) * TRACKPAD_ORBIT_PIXELS,
+            -wheel_x * TRACKPAD_ORBIT_PIXELS,
+            wheel_y * TRACKPAD_ORBIT_PIXELS,
         )
+    if shift or ctrl or meta:
+        return ("none",)
+    if abs(wheel_x) <= 1e-8:
+        return ("none",)
     return (
         "pan",
-        -float(wheel_x) * TRACKPAD_PAN_PIXELS,
-        float(wheel_y) * TRACKPAD_PAN_PIXELS,
+        -wheel_x * TRACKPAD_PAN_PIXELS,
+        0.0,
     )
+
+
+def _pinch_view_action(pinched):
+    pinched = float(pinched)
+    if abs(pinched) <= 1e-8:
+        return ("none",)
+    return ("dolly", -pinched * TRACKPAD_PINCH_DOLLY_PIXELS)
 
 
 def _wheel_delta(event):

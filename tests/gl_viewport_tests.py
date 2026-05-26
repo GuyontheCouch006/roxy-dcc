@@ -5,6 +5,7 @@ from rendering.gl_viewport import (
     ViewportCamera,
     _apply_world_translation,
     _build_gizmo_vertices,
+    _pinch_view_action,
     _scroll_wheel_view_action,
     build_scene_viewport_buffers,
     move_gizmo_drag_delta,
@@ -90,30 +91,39 @@ def test_viewport_camera_dolly_refreshes_clip_planes():
     assert camera.far > camera.near
 
 
-def test_scroll_wheel_without_modifiers_pans_for_trackpads():
+def test_scroll_wheel_horizontal_without_modifiers_pans_for_trackpads():
     action = _scroll_wheel_view_action(1.0, -2.0)
 
     assert action[0] == "pan"
     assert action[1] < 0
-    assert action[2] < 0
+    assert action[2] == 0.0
 
 
-def test_scroll_wheel_with_zoom_modifiers_dollies():
-    ctrl_action = _scroll_wheel_view_action(0.0, 1.0, ctrl=True)
-    meta_action = _scroll_wheel_view_action(0.0, 1.0, meta=True)
-    alt_action = _scroll_wheel_view_action(0.0, 1.0, alt=True)
+def test_scroll_wheel_vertical_without_modifiers_does_nothing():
+    action = _scroll_wheel_view_action(0.0, 1.0)
 
-    assert ctrl_action == meta_action == alt_action
-    assert ctrl_action[0] == "dolly"
-    assert ctrl_action[1] < 0
+    assert action == ("none",)
 
 
-def test_scroll_wheel_with_shift_orbits():
-    action = _scroll_wheel_view_action(1.0, -1.0, shift=True)
+def test_scroll_wheel_with_option_orbits_exclusively():
+    action = _scroll_wheel_view_action(1.0, -1.0, alt=True)
 
     assert action[0] == "orbit"
     assert action[1] < 0
     assert action[2] < 0
+
+
+def test_scroll_wheel_unmapped_modifiers_do_nothing():
+    assert _scroll_wheel_view_action(1.0, 1.0, shift=True) == ("none",)
+    assert _scroll_wheel_view_action(1.0, 1.0, ctrl=True) == ("none",)
+    assert _scroll_wheel_view_action(1.0, 1.0, meta=True) == ("none",)
+
+
+def test_pinch_gesture_dollies_for_zoom():
+    action = _pinch_view_action(0.1)
+
+    assert action[0] == "dolly"
+    assert action[1] < 0
 
 
 def test_scene_viewport_buffers_extract_indexed_mesh_vertices_and_color():
@@ -322,9 +332,11 @@ if __name__ == "__main__":
         test_viewport_camera_frame_bounds_centers_camera_on_scene,
         test_viewport_camera_frame_bounds_sets_adaptive_clip_planes,
         test_viewport_camera_dolly_refreshes_clip_planes,
-        test_scroll_wheel_without_modifiers_pans_for_trackpads,
-        test_scroll_wheel_with_zoom_modifiers_dollies,
-        test_scroll_wheel_with_shift_orbits,
+        test_scroll_wheel_horizontal_without_modifiers_pans_for_trackpads,
+        test_scroll_wheel_vertical_without_modifiers_does_nothing,
+        test_scroll_wheel_with_option_orbits_exclusively,
+        test_scroll_wheel_unmapped_modifiers_do_nothing,
+        test_pinch_gesture_dollies_for_zoom,
         test_scene_viewport_buffers_extract_indexed_mesh_vertices_and_color,
         test_scene_viewport_buffers_resolve_group_materials_per_triangle,
         test_scene_viewport_buffers_do_not_add_dcc_grid_to_selectable_scene,
