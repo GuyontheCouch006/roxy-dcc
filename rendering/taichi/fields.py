@@ -1,6 +1,8 @@
 import taichi as ti
 
-MAX_OBJECTS   = 10_000_000
+# Analytic primitive slots only. Mesh triangles live in the BVH arrays below,
+# so this should not scale with mesh triangle count.
+MAX_OBJECTS   = 131_072
 MAX_W         = 1920
 MAX_H         = 1080
 

@@ -171,7 +171,12 @@ def main():
     parser.add_argument("--resolution", default="64x36")
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--repeats", type=int, default=3)
-    parser.add_argument("--max-rays", type=int, default=4096)
+    parser.add_argument(
+        "--max-rays",
+        type=int,
+        default=0,
+        help="Limit primary rays for quick probes; 0 uses the full resolution.",
+    )
     parser.add_argument("--max-t", type=float, default=1e9)
     args = parser.parse_args()
 
@@ -187,6 +192,7 @@ def main():
 
     origins, directions = _primary_rays(world.active_camera, width, height)
     if args.max_rays and len(origins) > args.max_rays:
+        print(f"truncating rays: {len(origins):,} → {args.max_rays:,}")
         origins = origins[:args.max_rays]
         directions = directions[:args.max_rays]
     use_raw = _use_raw_arrays(args.backend)

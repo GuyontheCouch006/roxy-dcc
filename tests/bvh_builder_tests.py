@@ -75,6 +75,40 @@ def test_bvh_builder_default_uses_morton_order():
     assert list(builder._ordered_v0[:, 0]) == [0, 1, 2, 3, 4, 5, 6, 7]
 
 
+def test_bvh_builder_sah_path_splits_large_nodes():
+    tri_count = GPUBVHBuilder.SAH_HYBRID_LIMIT + 32
+    batch = TriangleBatch.from_dicts([_tri(x) for x in range(tri_count)])
+
+    builder = GPUBVHBuilder()
+    builder.MAX_LEAF_SIZE = 4
+    builder.build([batch], method="sah")
+
+    root = builder.nodes[0]
+    leaf_counts = [
+        node["tri_count"]
+        for node in builder.nodes
+        if node["left"] == -1 and node["right"] == -1
+    ]
+
+    assert root["left"] != -1
+    assert root["right"] != -1
+    assert sum(leaf_counts) == tri_count
+    assert set(builder.ordered_tris.tolist()) == set(range(tri_count))
+
+
+def test_bvh_builder_sah_degenerate_centroids_become_single_leaf():
+    tri_count = GPUBVHBuilder.SAH_HYBRID_LIMIT + 32
+    batch = TriangleBatch.from_dicts([_tri(0) for _ in range(tri_count)])
+
+    builder = GPUBVHBuilder()
+    builder.MAX_LEAF_SIZE = 4
+    builder.build([batch], method="sah")
+
+    assert len(builder.nodes) == 1
+    assert builder.nodes[0]["tri_count"] == tri_count
+    assert set(builder.ordered_tris.tolist()) == set(range(tri_count))
+
+
 def test_indexed_triangle_batch_keeps_compact_material_palette():
     arrays = {
         'v0': [[0, 0, 0], [2, 0, 0], [4, 0, 0]],
@@ -117,5 +151,7 @@ if __name__ == "__main__":
         test_bvh_builder_splits_batch_by_centroid_axis,
         test_bvh_builder_partition_split_separates_centroid_halves,
         test_bvh_builder_default_uses_morton_order,
+        test_bvh_builder_sah_path_splits_large_nodes,
+        test_bvh_builder_sah_degenerate_centroids_become_single_leaf,
         test_indexed_triangle_batch_keeps_compact_material_palette,
     ])

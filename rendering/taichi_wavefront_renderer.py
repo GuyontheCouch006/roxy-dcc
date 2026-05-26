@@ -7,6 +7,7 @@ from rendering.taichi import extract_scene
 from rendering.taichi.fields import (
     _pixels, _accumulator, _normal_accumulator, _albedo_accumulator,
     _depth_accumulator, _frame_count, _ray_count,
+    MAX_W, MAX_H, MAX_RAYS,
 )
 from rendering.taichi.wavefront import (
     wf_generate, wf_traverse_full, wf_traverse,
@@ -52,6 +53,19 @@ class TaichiWavefrontRenderer:
         self._count_rays = count_rays
         self._compact_rays = compact_rays
         self._split_direct_light = split_direct_light
+
+    @staticmethod
+    def _validate_image_size(width, height):
+        if width > MAX_W or height > MAX_H:
+            raise ValueError(
+                f"Taichi wavefront image size {width}x{height} exceeds "
+                f"field capacity {MAX_W}x{MAX_H}"
+            )
+        if width * height > MAX_RAYS:
+            raise ValueError(
+                f"Taichi wavefront image has {width * height} pixels but "
+                f"MAX_RAYS={MAX_RAYS}"
+            )
 
     @staticmethod
     def _direct_light_mode_to_id(mode):
@@ -125,6 +139,7 @@ class TaichiWavefrontRenderer:
     @timing.timer("render", tag="render")
     def render(self):
         W, H = self._image.width, self._image.height
+        self._validate_image_size(W, H)
         cam  = self._camera
 
         fov_tan = math.tan(math.radians(cam.fov) / 2)

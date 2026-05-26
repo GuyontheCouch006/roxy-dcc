@@ -15,6 +15,7 @@ from rendering.taichi.fields import (
     _wf_first_normal, _wf_first_albedo, _wf_first_depth,
     _wf_hit_t, _wf_hit_u, _wf_hit_v,
     _wf_hit_tri, _wf_hit_is_bvh, _wf_hit_bvh_mat, _wf_hit_normal,
+    MAX_RAYS,
 )
 from rendering.taichi.camera import get_ray_direction
 from rendering.taichi.intersect import scene_intersect, scene_occluded
@@ -39,24 +40,25 @@ def _direct_light_enqueue_or_inline(
             if ndotl > 0.0:
                 max_t = t_light * 0.999
                 if max_t > 0.001:
-                    if count_rays:
-                        _wf_ray_count[pixel_idx] += 1
                     slot = ti.atomic_add(_wf_shadow_count[None], 1)
-                    sample_weight = ti.cast(light_count, ti.f32)
-                    _wf_shadow_pixel[slot] = pixel_idx
-                    _wf_shadow_ro[slot] = hit_p + normal * 1e-4
-                    _wf_shadow_rd[slot] = light_dir
-                    _wf_shadow_max_t[slot] = max_t
-                    _wf_shadow_contrib[slot] = (
-                        throughput *
-                        albedo *
-                        _light_albedo[light_idx] *
-                        _light_emission[light_idx] *
-                        ndotl *
-                        solid_angle_scale *
-                        sample_weight *
-                        strength
-                    )
+                    if slot < MAX_RAYS:
+                        if count_rays:
+                            _wf_ray_count[pixel_idx] += 1
+                        sample_weight = ti.cast(light_count, ti.f32)
+                        _wf_shadow_pixel[slot] = pixel_idx
+                        _wf_shadow_ro[slot] = hit_p + normal * 1e-4
+                        _wf_shadow_rd[slot] = light_dir
+                        _wf_shadow_max_t[slot] = max_t
+                        _wf_shadow_contrib[slot] = (
+                            throughput *
+                            albedo *
+                            _light_albedo[light_idx] *
+                            _light_emission[light_idx] *
+                            ndotl *
+                            solid_angle_scale *
+                            sample_weight *
+                            strength
+                        )
     else:
         direct, shadow_rays = direct_light_sample(
             hit_p, normal, albedo, direct_light_mode)
@@ -381,12 +383,15 @@ def wf_shade(
                     _wf_ro[i] = hit_p + normal * 1e-4
                     _wf_rd[i] = new_rd
                     slot = ti.atomic_add(_wf_next_count[None], 1)
-                    _wf_next_indices[slot] = i
+                    if slot < MAX_RAYS:
+                        _wf_next_indices[slot] = i
+                    else:
+                        _wf_active[i] = 0
 
 
 @ti.kernel
 def wf_resolve_shadows():
-    for slot in range(_wf_shadow_count[None]):
+    for slot in range(ti.min(_wf_shadow_count[None], MAX_RAYS)):
         pixel_idx = _wf_shadow_pixel[slot]
         if scene_occluded(_wf_shadow_ro[slot], _wf_shadow_rd[slot], _wf_shadow_max_t[slot]) == 0:
             _wf_color[pixel_idx] += _wf_shadow_contrib[slot]
@@ -394,7 +399,7 @@ def wf_resolve_shadows():
 
 @ti.kernel
 def wf_swap_queues():
-    next_count = _wf_next_count[None]
+    next_count = ti.min(_wf_next_count[None], MAX_RAYS)
     for q in range(next_count):
         _wf_curr_indices[q] = _wf_next_indices[q]
     _wf_curr_count[None] = next_count

@@ -588,8 +588,9 @@ class GPUBVHBuilder:
             if c_max - c_min < 1e-8:
                 continue
 
+            denom = c_max - c_min
             bin_ids = np.clip(
-                ((centroids[:, axis] - c_min) * (K / (c_max - c_min))).astype(np.int32),
+                ((centroids[:, axis] - c_min) * (K / denom)).astype(np.int32),
                 0, K - 1,
             )
 
@@ -661,8 +662,9 @@ class GPUBVHBuilder:
         # Partition along best axis / bin
         c_min = float(centroids[:, best_axis].min())
         c_max = float(centroids[:, best_axis].max())
+        denom = c_max - c_min
         bin_ids = np.clip(
-            ((centroids[:, best_axis] - c_min) * (K / (c_max - c_min + 1e-12))).astype(np.int32),
+            ((centroids[:, best_axis] - c_min) * (K / denom)).astype(np.int32),
             0, K - 1,
         )
         left_mask = bin_ids <= best_split_bin
