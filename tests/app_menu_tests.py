@@ -58,6 +58,26 @@ def test_menu_script_create_primitive_uses_session_and_is_undoable():
     assert window.viewport.selected_object is None
 
 
+def test_create_sphere_menu_action_dispatches_sphere_command():
+    _ensure_qapp()
+    window = RoxyMainWindow(World(use_sky=False))
+    window._command_values = lambda title, fields: {
+        "name": "menuSphere",
+        "radius": 1.0,
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0,
+        "color_r": 0.8,
+        "color_g": 0.8,
+        "color_b": 0.8,
+    }
+
+    window.findChild(QtGui.QAction, "createSphereAction").trigger()
+
+    assert len(window.session.world.objects) == 1
+    assert isinstance(window.session.world.objects[0].shape, Sphere)
+
+
 def test_menu_script_create_light_adds_emissive_object():
     _ensure_qapp()
     window = RoxyMainWindow(World(use_sky=False))
@@ -98,6 +118,7 @@ if __name__ == "__main__":
     run_tests([
         test_main_window_builds_file_and_create_menus,
         test_menu_script_create_primitive_uses_session_and_is_undoable,
+        test_create_sphere_menu_action_dispatches_sphere_command,
         test_menu_script_create_light_adds_emissive_object,
         _versioned_path_smoke,
     ])

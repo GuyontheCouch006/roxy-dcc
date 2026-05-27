@@ -13,6 +13,7 @@ import numpy as np
 
 from core import AABB, Mat4x4, Ray, Vec3
 from scene.mesh import IndexedMesh, Mesh, Triangle
+from scene.primitives import Sphere
 
 try:
     import pygame
@@ -1309,6 +1310,9 @@ def _extract_shape_arrays(obj, shape, default_color):
     if isinstance(geometry, Triangle):
         return _extract_triangles(obj, shape, [geometry], default_color)
 
+    if isinstance(geometry, Sphere):
+        return _extract_sphere_proxy(obj, shape, geometry, default_color)
+
     local_bounds = geometry.local_bounds()
     if local_bounds is None:
         return None
@@ -1334,6 +1338,56 @@ def _extract_triangles(obj, shape, triangles, default_color):
         np.asarray(vertices, dtype=np.float32).reshape((-1, 3)),
         np.asarray(normals, dtype=np.float32).reshape((-1, 3)),
         np.asarray(colors, dtype=np.float32).reshape((-1, 3)),
+    )
+
+
+def _extract_sphere_proxy(obj, shape, sphere, default_color, rings=12, segments=24):
+    radius = float(getattr(sphere, "_radius", 1.0))
+    matrix = obj.world_matrix
+    normal_matrix = obj.world_inverse_transpose_matrix
+    color = _material_color(shape.material_for_group("default"), default_color)
+    vertices = []
+    normals = []
+    colors = []
+
+    def local_point(theta, phi):
+        sin_theta = math.sin(theta)
+        return Vec3(
+            radius * sin_theta * math.cos(phi),
+            radius * math.cos(theta),
+            radius * sin_theta * math.sin(phi),
+        )
+
+    def append_triangle(a, b, c):
+        pa = _vec3_to_np(a)
+        pb = _vec3_to_np(b)
+        pc = _vec3_to_np(c)
+        if float(np.linalg.norm(np.cross(pb - pa, pc - pa))) <= 1e-8:
+            return
+        for point in (a, b, c):
+            local_normal = point.normalize()
+            world_normal = normal_matrix.transform_vector(local_normal).normalize()
+            vertices.append(_vec3_to_np(matrix.transform_point(point)))
+            normals.append(_vec3_to_np(world_normal))
+            colors.append(color)
+
+    for ring in range(rings):
+        theta0 = math.pi * ring / rings
+        theta1 = math.pi * (ring + 1) / rings
+        for segment in range(segments):
+            phi0 = math.tau * segment / segments
+            phi1 = math.tau * (segment + 1) / segments
+            p00 = local_point(theta0, phi0)
+            p01 = local_point(theta0, phi1)
+            p10 = local_point(theta1, phi0)
+            p11 = local_point(theta1, phi1)
+            append_triangle(p00, p10, p11)
+            append_triangle(p00, p11, p01)
+
+    return (
+        np.asarray(vertices, dtype=np.float32),
+        np.asarray(normals, dtype=np.float32),
+        np.asarray(colors, dtype=np.float32),
     )
 
 

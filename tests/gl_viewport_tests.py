@@ -20,7 +20,7 @@ from rendering.gl_viewport import (
     rotate_gizmo_drag_degrees,
     scale_gizmo_drag_factor,
 )
-from scene import Diffuse, IndexedMesh, Plane, SceneObject, Shape, World
+from scene import Diffuse, IndexedMesh, Plane, SceneObject, Shape, Sphere, World
 from tests.utils import approx_eq, run_tests, vec3_approx_eq
 
 
@@ -180,6 +180,23 @@ def test_scene_viewport_buffers_resolve_group_materials_per_triangle():
     assert buffers.triangle_count == 2
     assert np.allclose(buffers.colors[:3], np.array([[1, 0, 0]] * 3, dtype=np.float32))
     assert np.allclose(buffers.colors[3:6], np.array([[0, 1, 0]] * 3, dtype=np.float32))
+
+
+def test_scene_viewport_buffers_draw_spheres_as_spherical_proxy():
+    obj = SceneObject(
+        shape=Sphere(1.0),
+        material=Diffuse(Color(0.8, 0.2, 0.2)),
+        name="sphere",
+    )
+    world = World(objects=[obj], use_sky=False)
+
+    buffers = build_scene_viewport_buffers(world)
+    radii = np.linalg.norm(buffers.vertices, axis=1)
+    unique_vertices = np.unique(np.round(buffers.vertices, 4), axis=0)
+
+    assert buffers.triangle_count > 12
+    assert np.allclose(radii, np.ones_like(radii), atol=1e-5)
+    assert len(unique_vertices) > 8
 
 
 def test_scene_viewport_buffers_do_not_add_dcc_grid_to_selectable_scene():
@@ -428,6 +445,7 @@ if __name__ == "__main__":
         test_pinch_gesture_dollies_for_zoom,
         test_scene_viewport_buffers_extract_indexed_mesh_vertices_and_color,
         test_scene_viewport_buffers_resolve_group_materials_per_triangle,
+        test_scene_viewport_buffers_draw_spheres_as_spherical_proxy,
         test_scene_viewport_buffers_do_not_add_dcc_grid_to_selectable_scene,
         test_selection_overlay_vertices_are_unlit_position_color_only,
         test_pick_scene_object_returns_nearest_object_under_cursor,
