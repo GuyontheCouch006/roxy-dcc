@@ -556,6 +556,7 @@ class GLViewport:
             screen_y,
             self._width,
             self._height,
+            axes=_object_gizmo_axes(self._selected_object),
         )
         if hit is None:
             return False
@@ -842,7 +843,8 @@ class GLViewport:
 
         origin = _object_gizmo_origin(self._selected_object)
         size = _object_gizmo_size(self._selected_object)
-        vertices = _build_gizmo_vertices(origin, size, self._gizmo_mode)
+        axes = _object_gizmo_axes(self._selected_object)
+        vertices = _build_gizmo_vertices(origin, size, self._gizmo_mode, axes=axes)
         if len(vertices) == 0:
             return
 
@@ -1036,14 +1038,23 @@ def _pick_object_shapes(obj, world_ray):
     return closest
 
 
-def pick_move_gizmo_axis(scene_object, viewport_camera, screen_x, screen_y, width, height, threshold=12.0):
+def pick_move_gizmo_axis(
+    scene_object,
+    viewport_camera,
+    screen_x,
+    screen_y,
+    width,
+    height,
+    threshold=12.0,
+    axes=None,
+):
     origin = _object_gizmo_origin(scene_object)
     size = _object_gizmo_size(scene_object)
     mouse = np.asarray([screen_x, screen_y], dtype=np.float32)
     best = None
     best_distance = float(threshold)
 
-    for axis_name, axis in _gizmo_axes().items():
+    for axis_name, axis in (axes or _gizmo_axes()).items():
         start = viewport_camera.project_point(origin, width, height)
         end = viewport_camera.project_point(origin + axis * size, width, height)
         if start is None or end is None:
@@ -1056,14 +1067,23 @@ def pick_move_gizmo_axis(scene_object, viewport_camera, screen_x, screen_y, widt
     return best
 
 
-def pick_rotate_gizmo_axis(scene_object, viewport_camera, screen_x, screen_y, width, height, threshold=12.0):
+def pick_rotate_gizmo_axis(
+    scene_object,
+    viewport_camera,
+    screen_x,
+    screen_y,
+    width,
+    height,
+    threshold=12.0,
+    axes=None,
+):
     origin = _object_gizmo_origin(scene_object)
     size = _object_gizmo_size(scene_object)
     mouse = np.asarray([screen_x, screen_y], dtype=np.float32)
     best = None
     best_distance = float(threshold)
 
-    for axis_name, axis in _gizmo_axes().items():
+    for axis_name, axis in (axes or _gizmo_axes()).items():
         ring = _ring_points(origin, axis, size, segments=64)
         projected = [viewport_camera.project_point(point, width, height) for point in ring]
         for i, start in enumerate(projected):
@@ -1130,24 +1150,35 @@ def rotate_gizmo_drag_degrees(viewport_camera, origin, axis, start_mouse, curren
     return math.degrees(signed)
 
 
-def gizmo_axis_rotation_matrix(axis_name, degrees):
-    if axis_name == "x":
-        return Mat4x4.rotation_x(degrees)
-    if axis_name == "y":
-        return Mat4x4.rotation_y(degrees)
-    if axis_name == "z":
-        return Mat4x4.rotation_z(degrees)
-    raise ValueError("axis_name must be 'x', 'y', or 'z'")
+def gizmo_axis_rotation_matrix(axis, degrees):
+    if isinstance(axis, str):
+        axis = _gizmo_axes()[axis]
+    axis = _normalize(axis)
+    x, y, z = (float(axis[0]), float(axis[1]), float(axis[2]))
+    c = math.cos(math.radians(float(degrees)))
+    s = math.sin(math.radians(float(degrees)))
+    one_minus_c = 1.0 - c
+    return Mat4x4([
+        [c + x * x * one_minus_c, x * y * one_minus_c - z * s, x * z * one_minus_c + y * s, 0.0],
+        [y * x * one_minus_c + z * s, c + y * y * one_minus_c, y * z * one_minus_c - x * s, 0.0],
+        [z * x * one_minus_c - y * s, z * y * one_minus_c + x * s, c + z * z * one_minus_c, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ])
 
 
-def gizmo_axis_scale_matrix(axis_name, factor):
-    if axis_name == "x":
-        return Mat4x4.scale(factor, 1.0, 1.0)
-    if axis_name == "y":
-        return Mat4x4.scale(1.0, factor, 1.0)
-    if axis_name == "z":
-        return Mat4x4.scale(1.0, 1.0, factor)
-    raise ValueError("axis_name must be 'x', 'y', or 'z'")
+def gizmo_axis_scale_matrix(axis, factor):
+    if isinstance(axis, str):
+        axis = _gizmo_axes()[axis]
+    axis = _normalize(axis)
+    factor = float(factor)
+    x, y, z = (float(axis[0]), float(axis[1]), float(axis[2]))
+    amount = factor - 1.0
+    return Mat4x4([
+        [1.0 + amount * x * x, amount * x * y, amount * x * z, 0.0],
+        [amount * y * x, 1.0 + amount * y * y, amount * y * z, 0.0],
+        [amount * z * x, amount * z * y, 1.0 + amount * z * z, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
+    ])
 
 
 def _apply_world_translation(scene_object, world_delta, start_translation=None, start_matrix=None):
@@ -1180,6 +1211,18 @@ def _gizmo_axes():
         "y": np.array([0.0, 1.0, 0.0], dtype=np.float32),
         "z": np.array([0.0, 0.0, 1.0], dtype=np.float32),
     }
+
+
+def _object_gizmo_axes(scene_object):
+    try:
+        matrix = scene_object.world_matrix
+        return {
+            "x": _normalize(_vec3_to_np(matrix.transform_vector(Vec3(1, 0, 0)))),
+            "y": _normalize(_vec3_to_np(matrix.transform_vector(Vec3(0, 1, 0)))),
+            "z": _normalize(_vec3_to_np(matrix.transform_vector(Vec3(0, 0, 1)))),
+        }
+    except Exception:
+        return _gizmo_axes()
 
 
 def _screen_segment_distance(point, start, end):
@@ -1355,13 +1398,14 @@ def _object_gizmo_size(scene_object):
     return max(min(radius * 0.65, 10.0), 0.5)
 
 
-def _build_gizmo_vertices(origin, size, mode):
+def _build_gizmo_vertices(origin, size, mode, axes=None):
     origin = _as_np3(origin)
     size = float(size)
     lines = []
-    x_axis = np.array([1.0, 0.0, 0.0], dtype=np.float32)
-    y_axis = np.array([0.0, 1.0, 0.0], dtype=np.float32)
-    z_axis = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    axes = axes or _gizmo_axes()
+    x_axis = axes["x"]
+    y_axis = axes["y"]
+    z_axis = axes["z"]
     axes = (
         (x_axis, np.array([1.0, 0.18, 0.16], dtype=np.float32)),
         (y_axis, np.array([0.22, 0.86, 0.28], dtype=np.float32)),
@@ -1379,9 +1423,27 @@ def _build_gizmo_vertices(origin, size, mode):
             _append_line(lines, origin, end, color)
             _append_scale_handle(lines, end, axis, color, size * 0.11)
     elif mode == "rotate":
-        _append_ring(lines, origin, x_axis, np.array([1.0, 0.18, 0.16], dtype=np.float32), size)
-        _append_ring(lines, origin, y_axis, np.array([0.22, 0.86, 0.28], dtype=np.float32), size)
-        _append_ring(lines, origin, z_axis, np.array([0.22, 0.42, 1.0], dtype=np.float32), size)
+        _append_ring(
+            lines,
+            origin,
+            x_axis,
+            np.array([1.0, 0.18, 0.16], dtype=np.float32),
+            size,
+        )
+        _append_ring(
+            lines,
+            origin,
+            y_axis,
+            np.array([0.22, 0.86, 0.28], dtype=np.float32),
+            size,
+        )
+        _append_ring(
+            lines,
+            origin,
+            z_axis,
+            np.array([0.22, 0.42, 1.0], dtype=np.float32),
+            size,
+        )
     else:
         raise ValueError("gizmo mode must be 'move', 'rotate', or 'scale'")
 
@@ -1425,7 +1487,10 @@ def _ring_points(origin, normal, radius, segments=64):
     points = []
     for i in range(segments):
         angle = (i / segments) * math.tau
-        points.append(origin + (basis_a * math.cos(angle) + basis_b * math.sin(angle)) * radius)
+        points.append(
+            origin
+            + (basis_a * math.cos(angle) + basis_b * math.sin(angle)) * radius
+        )
     return points
 
 

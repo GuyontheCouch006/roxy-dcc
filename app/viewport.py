@@ -13,6 +13,7 @@ from rendering.gl_viewport import (
     ViewportCamera,
     _build_gizmo_vertices,
     _build_grid_vertices,
+    _object_gizmo_axes,
     _object_gizmo_origin,
     _object_gizmo_size,
     _pinch_view_action,
@@ -328,6 +329,7 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         if self._selected_object is None or self._gizmo_mode not in ("move", "rotate", "scale"):
             return False
         picker = pick_rotate_gizmo_axis if self._gizmo_mode == "rotate" else pick_move_gizmo_axis
+        axes = _object_gizmo_axes(self._selected_object)
         hit = picker(
             self._selected_object,
             self._camera,
@@ -335,6 +337,7 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             screen_y,
             max(self.width(), 1),
             max(self.height(), 1),
+            axes=axes,
         )
         if hit is None:
             return False
@@ -390,7 +393,7 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
                 width,
                 height,
             )
-            matrix = gizmo_axis_rotation_matrix(drag.axis_name, degrees)
+            matrix = gizmo_axis_rotation_matrix(drag.axis, degrees)
             pivot = drag.origin
         else:
             factor = scale_gizmo_drag_factor(
@@ -403,7 +406,7 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
                 width,
                 height,
             )
-            matrix = gizmo_axis_scale_matrix(drag.axis_name, factor)
+            matrix = gizmo_axis_scale_matrix(drag.axis, factor)
             pivot = drag.origin
         self._session.preview_transform(matrix, pivot=pivot)
         return True
@@ -885,7 +888,8 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
 
         origin = _object_gizmo_origin(self._selected_object)
         size = _object_gizmo_size(self._selected_object)
-        vertices = _build_gizmo_vertices(origin, size, self._gizmo_mode)
+        axes = _object_gizmo_axes(self._selected_object)
+        vertices = _build_gizmo_vertices(origin, size, self._gizmo_mode, axes=axes)
         if len(vertices) == 0:
             return
 

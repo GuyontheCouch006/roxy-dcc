@@ -5,6 +5,7 @@ from rendering.gl_viewport import (
     ViewportCamera,
     _apply_world_translation,
     _build_gizmo_vertices,
+    _object_gizmo_axes,
     _object_gizmo_origin,
     _object_gizmo_size,
     _pinch_view_action,
@@ -280,9 +281,41 @@ def test_scale_gizmo_drag_factor_tracks_axis_units():
 def test_gizmo_axis_matrices_apply_expected_world_axes():
     rotated = gizmo_axis_rotation_matrix("z", 90).transform_vector(Vec3(1, 0, 0))
     scaled = gizmo_axis_scale_matrix("x", 3).transform_vector(Vec3(1, 1, 1))
+    arbitrary_rotated = gizmo_axis_rotation_matrix(
+        np.array([0, 1, 0], dtype=np.float32),
+        90,
+    ).transform_vector(Vec3(0, 0, 1))
+    arbitrary_scaled = gizmo_axis_scale_matrix(
+        np.array([0, 1, 0], dtype=np.float32),
+        3,
+    ).transform_vector(Vec3(1, 1, 1))
 
     assert vec3_approx_eq(rotated, Vec3(0, 1, 0))
     assert vec3_approx_eq(scaled, Vec3(3, 1, 1))
+    assert vec3_approx_eq(arbitrary_rotated, Vec3(1, 0, 0))
+    assert vec3_approx_eq(arbitrary_scaled, Vec3(1, 3, 1))
+
+
+def test_object_gizmo_axes_follow_local_rotation():
+    obj = SceneObject(rotation=Vec3(0, 0, 90))
+
+    axes = _object_gizmo_axes(obj)
+
+    assert np.allclose(axes["x"], np.array([0, 1, 0], dtype=np.float32), atol=1e-6)
+    assert np.allclose(axes["y"], np.array([-1, 0, 0], dtype=np.float32), atol=1e-6)
+
+
+def test_build_gizmo_vertices_can_use_local_axes():
+    origin = np.array([0, 0, 0], dtype=np.float32)
+    axes = {
+        "x": np.array([0, 1, 0], dtype=np.float32),
+        "y": np.array([-1, 0, 0], dtype=np.float32),
+        "z": np.array([0, 0, 1], dtype=np.float32),
+    }
+
+    vertices = _build_gizmo_vertices(origin, 2.0, "move", axes=axes)
+
+    assert np.allclose(vertices[1, :3], np.array([0, 2, 0], dtype=np.float32))
 
 
 def test_apply_world_translation_updates_component_transform():
@@ -388,6 +421,8 @@ if __name__ == "__main__":
         test_rotate_gizmo_drag_degrees_tracks_ring_plane_angle,
         test_scale_gizmo_drag_factor_tracks_axis_units,
         test_gizmo_axis_matrices_apply_expected_world_axes,
+        test_object_gizmo_axes_follow_local_rotation,
+        test_build_gizmo_vertices_can_use_local_axes,
         test_apply_world_translation_updates_component_transform,
         test_apply_world_translation_updates_matrix_transform,
         test_build_gizmo_vertices_returns_mode_specific_line_vertices,

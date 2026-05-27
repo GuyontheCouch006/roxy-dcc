@@ -8,7 +8,11 @@ from PySide6 import QtGui
 from app.main_window import RoxyMainWindow
 from app.viewport import QtGLViewport
 from core import Color, Vec3
-from rendering.gl_viewport import _object_gizmo_origin, _object_gizmo_size
+from rendering.gl_viewport import (
+    _object_gizmo_axes,
+    _object_gizmo_origin,
+    _object_gizmo_size,
+)
 from scene import Camera, Diffuse, SceneObject, Sphere, World
 from tests.utils import run_tests
 
@@ -129,6 +133,38 @@ def test_move_gizmo_drag_uses_session_and_records_one_undo_item():
     assert root.world_matrix.transform_point(Vec3(0, 0, 0)) == Vec3(0, 0, 0)
 
 
+def test_move_gizmo_drag_defaults_to_active_object_local_axis():
+    _ensure_qapp()
+    world = World(use_sky=False)
+    root = SceneObject(
+        shape=Sphere(1.0),
+        material=Diffuse(Color(0.8, 0.2, 0.2)),
+        rotation=Vec3(0, 0, 90),
+        name="rotated",
+    )
+    world.add_object(root)
+    world.add_camera(Camera(name="camera1"))
+    window = RoxyMainWindow(world)
+    viewport = window.viewport
+    viewport.resize(800, 600)
+    window.session.replace_selection(root)
+    viewport.set_gizmo_mode("move")
+
+    origin = _object_gizmo_origin(root)
+    size = _object_gizmo_size(root)
+    axis = _object_gizmo_axes(root)["x"]
+    start = viewport.camera.project_point(origin + axis * size * 0.5, 800, 600)[:2]
+    end = viewport.camera.project_point(origin + axis * size, 800, 600)[:2]
+
+    assert viewport.begin_transform_gizmo_drag(float(start[0]), float(start[1]))
+    assert viewport.drag_transform_gizmo(float(end[0]), float(end[1]))
+    viewport.end_transform_gizmo_drag()
+
+    moved = root.world_matrix.transform_point(Vec3(0, 0, 0))
+    assert moved.y > 0.0
+    assert abs(moved.x) < 1e-5
+
+
 def test_viewport_hotkeys_switch_gizmo_modes():
     _ensure_qapp()
     world, _root = _single_object_world()
@@ -234,6 +270,7 @@ if __name__ == "__main__":
         test_main_window_viewport_selection_updates_scene_graph,
         test_viewport_pick_toggle_updates_shared_session_selection,
         test_move_gizmo_drag_uses_session_and_records_one_undo_item,
+        test_move_gizmo_drag_defaults_to_active_object_local_axis,
         test_viewport_hotkeys_switch_gizmo_modes,
         test_main_window_visibility_change_refreshes_viewport_buffers,
     ])
