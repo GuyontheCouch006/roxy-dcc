@@ -6,7 +6,7 @@ import sys
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from PySide6 import QtCore, QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from app.scene_graph import SceneGraphModel, SceneGraphRoles
 from app.viewport import QtGLViewport
@@ -186,6 +186,12 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
         self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, scene_graph_dock)
 
         self.setCentralWidget(self._viewport)
+        self._undo_shortcut = QtGui.QShortcut(
+            QtGui.QKeySequence.StandardKey.Undo,
+            self,
+        )
+        self._undo_shortcut.setContext(QtCore.Qt.ShortcutContext.WindowShortcut)
+        self._undo_shortcut.activated.connect(self.undo)
 
     @property
     def scene_graph(self):
@@ -201,6 +207,9 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
 
     def set_world(self, world):
         self._session.set_world(world)
+
+    def undo(self):
+        return self._session.undo()
 
 
 def run(world=None):

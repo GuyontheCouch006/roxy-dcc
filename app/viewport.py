@@ -583,7 +583,14 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
 
     def keyPressEvent(self, event):
         key = event.key()
-        if key == QtCore.Qt.Key.Key_F:
+        modifiers = event.modifiers()
+        if (
+            key == QtCore.Qt.Key.Key_Z
+            and modifiers & QtCore.Qt.KeyboardModifier.ControlModifier
+            and self._session is not None
+        ):
+            self._session.undo()
+        elif key == QtCore.Qt.Key.Key_F:
             self.frame_selection_or_scene()
         elif key == QtCore.Qt.Key.Key_Q:
             self.set_gizmo_mode("select")

@@ -185,6 +185,26 @@ def test_viewport_hotkeys_switch_gizmo_modes():
         assert viewport.gizmo_mode == mode
 
 
+def test_ctrl_z_undo_shortcut_restores_session_state():
+    _ensure_qapp()
+    world, root = _single_object_world()
+    window = RoxyMainWindow(world)
+    handle = window.session.object(root)
+    handle.move(x=2)
+
+    assert root.translation == Vec3(2, 0, 0)
+
+    event = QtGui.QKeyEvent(
+        QtCore.QEvent.Type.KeyPress,
+        QtCore.Qt.Key.Key_Z,
+        QtCore.Qt.KeyboardModifier.ControlModifier,
+    )
+    window.viewport.keyPressEvent(event)
+
+    assert event.isAccepted()
+    assert root.translation == Vec3(0, 0, 0)
+
+
 def test_main_window_visibility_change_refreshes_viewport_buffers():
     _ensure_qapp()
     world, root = _single_object_world()
@@ -272,5 +292,6 @@ if __name__ == "__main__":
         test_move_gizmo_drag_uses_session_and_records_one_undo_item,
         test_move_gizmo_drag_defaults_to_active_object_local_axis,
         test_viewport_hotkeys_switch_gizmo_modes,
+        test_ctrl_z_undo_shortcut_restores_session_state,
         test_main_window_visibility_change_refreshes_viewport_buffers,
     ])
