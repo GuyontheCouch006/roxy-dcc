@@ -16,7 +16,19 @@ from scene.commands import (
 from scene.camera import Camera
 from scene.history import GeometrySourceNode
 from scene.materials import Material
-from scene.node_handles import CameraHandle, HistoryNodeHandle, MaterialHandle, ShapeHandle
+from scene.naming import (
+    clean_node_name,
+    default_node_name,
+    ensure_scene_node_names,
+    unique_node_name,
+)
+from scene.node_handles import (
+    CameraHandle,
+    HistoryNodeHandle,
+    MaterialHandle,
+    ShapeHandle,
+    WorldHandle,
+)
 from scene.object_handle import ObjectHandle
 from scene.scene_object import SceneObject
 from scene.shape import Shape
@@ -56,6 +68,7 @@ class SceneSession:
         self._preview = None
         self._world_listeners = []
         self._history_nodes = {}
+        self._ensure_node_names()
 
     @property
     def undo_count(self):
@@ -77,6 +90,7 @@ class SceneSession:
         if world is self.world:
             return
         self.world = world
+        self._ensure_node_names()
         self._handles.clear()
         self._history_nodes.clear()
         self._selected = ()
@@ -95,14 +109,33 @@ class SceneSession:
         scene_objects = tuple(scene_objects)
         if not scene_objects:
             return ()
+        self._ensure_node_names(extra_objects=scene_objects)
         command = AddObjectsCommand(self, scene_objects, select=select, active=active)
         self._execute(command)
         return tuple(self._handle_for(scene_object) for scene_object in scene_objects)
 
     def notify_world_changed(self):
+        self._ensure_node_names()
         self._notify_world_changed()
         self._notify_selection_changed()
         self._notify_scene_changed()
+
+    def node(self, name_or_payload):
+        payload = self._coerce_node_query(name_or_payload)
+        if payload is not None:
+            return self._payload_handle_for(payload)
+        name = str(name_or_payload)
+        for payload, _kind in self._iter_named_payloads(include_history=True):
+            if getattr(payload, "name", "") == name:
+                return self._payload_handle_for(payload)
+        raise KeyError(f"No scene node named {name_or_payload!r}")
+
+    def nodes(self, kind=None, raw=False):
+        result = []
+        for payload, payload_kind in self._iter_named_payloads(include_history=True):
+            if kind is None or payload_kind == kind:
+                result.append(payload if raw else self._payload_handle_for(payload))
+        return tuple(result)
 
     def object(self, name_or_scene_object):
         if isinstance(name_or_scene_object, ObjectHandle):
@@ -640,6 +673,9 @@ class SceneSession:
     def _history_handle_for(self, node):
         return self._generic_handle_for(node, HistoryNodeHandle)
 
+    def _world_handle_for(self, world):
+        return self._generic_handle_for(world, WorldHandle)
+
     def _generic_handle_for(self, raw, handle_type):
         key = (handle_type, id(raw))
         handle = self._handles.get(key)
@@ -661,6 +697,8 @@ class SceneSession:
             return self._camera_handle_for(payload)
         if isinstance(payload, GeometrySourceNode):
             return self._history_handle_for(payload)
+        if isinstance(payload, World):
+            return self._world_handle_for(payload)
         return payload
 
     def _coerce_scene_objects(self, scene_objects):
@@ -705,7 +743,13 @@ class SceneSession:
     def _coerce_payload(self, item):
         if isinstance(item, ObjectHandle):
             item = item.raw
-        elif isinstance(item, (ShapeHandle, MaterialHandle, CameraHandle, HistoryNodeHandle)):
+        elif isinstance(item, (
+            ShapeHandle,
+            MaterialHandle,
+            CameraHandle,
+            HistoryNodeHandle,
+            WorldHandle,
+        )):
             item = item.raw
         if item is None:
             return None
@@ -757,13 +801,89 @@ class SceneSession:
                 if material is not None:
                     yield material
 
+    def _ensure_node_names(self, extra_objects=(), extra_cameras=(), extra_lights=()):
+        ensure_scene_node_names(
+            self.world,
+            extra_objects=extra_objects,
+            extra_cameras=extra_cameras,
+            extra_lights=extra_lights,
+        )
+
+    def _coerce_node_query(self, item):
+        if isinstance(item, (
+            ObjectHandle,
+            ShapeHandle,
+            MaterialHandle,
+            CameraHandle,
+            HistoryNodeHandle,
+            WorldHandle,
+        )):
+            return self._coerce_payload(item)
+        if isinstance(item, (
+            SceneObject,
+            Shape,
+            Material,
+            Camera,
+            GeometrySourceNode,
+            World,
+        )):
+            return self._coerce_payload(item)
+        return None
+
+    def _iter_named_payloads(self, include_history=False):
+        yield self.world, "world"
+        for scene_object in walk_scene_objects(self.world):
+            yield scene_object, "object"
+        for shape in self._walk_shapes():
+            yield shape, "shape"
+
+        seen_materials = set()
+        for material in self._walk_materials():
+            key = id(material)
+            if key in seen_materials:
+                continue
+            seen_materials.add(key)
+            yield material, "material"
+
+        for camera in self.world.cameras:
+            yield camera, "camera"
+
+        for light in self.world.lights:
+            if hasattr(light, "name"):
+                yield light, "light"
+
+        if include_history:
+            for node in self.history_nodes(raw=True):
+                yield node, "history"
+
+    def _unique_node_name(self, requested, target):
+        used = {
+            getattr(payload, "name", "")
+            for payload, _kind in self._iter_named_payloads(include_history=False)
+            if payload is not target and getattr(payload, "name", "")
+        }
+        for node in self._history_nodes.values():
+            if node is not target and getattr(node, "name", ""):
+                used.add(node.name)
+        default = default_node_name(target)
+        if isinstance(target, Shape):
+            owner = self._owner_for_shape(target)
+            default = default_node_name(target, owner=owner)
+        return unique_node_name(clean_node_name(requested) or default, used)
+
+    def _owner_for_shape(self, target):
+        for scene_object in walk_scene_objects(self.world):
+            if target in scene_object.shapes:
+                return scene_object
+        return None
+
     def _history_node_for_shape(self, shape):
         shape = self._coerce_shape(shape)
         geometry = shape.geometry
         key = id(shape)
         node = self._history_nodes.get(key)
         type_name = type(geometry).__name__ if geometry is not None else "None"
-        name = f"{shape.name or type_name}Source"
+        name = self._unique_node_name(f"{shape.name or type_name}Source", node)
         attrs = _geometry_attrs(geometry)
         if node is None:
             node = GeometrySourceNode(shape=shape, name=name, type_name=type_name, attrs=attrs)
@@ -796,6 +916,8 @@ class SceneSession:
                 return getattr(target, attr_name)
             return target.attrs.get(attr_name)
         if isinstance(target, World):
+            if attr_name == "name":
+                return target.name
             if attr_name == "use_sky":
                 return target.use_sky
             if attr_name == "background_color":
@@ -803,7 +925,8 @@ class SceneSession:
         raise ValueError(f"Unsupported attribute {attr_name!r}")
 
     def _coerce_attr_value(self, target, attr_name, value):
-        del target, attr_name
+        if str(attr_name) == "name" and hasattr(target, "name"):
+            return self._unique_node_name(value, target)
         return value
 
     def _apply_attr_raw(self, target, attr_name, value):
@@ -837,6 +960,9 @@ class SceneSession:
                 target.attrs[attr_name] = value
             return
         if isinstance(target, World):
+            if attr_name == "name":
+                target.name = value
+                return
             if attr_name == "use_sky":
                 target.use_sky = bool(value)
                 return

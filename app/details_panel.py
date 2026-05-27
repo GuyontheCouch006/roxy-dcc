@@ -119,6 +119,7 @@ class DetailsPanel(QtWidgets.QWidget):
                 self._add_readonly("name", payload.name)
                 self._add_readonly("type", payload.type_name)
             elif isinstance(payload, World):
+                self._add_text("name", payload.name)
                 self._add_bool("use_sky", payload.use_sky)
                 self._add_vec3("background_color", payload.background_color, color=True)
         finally:

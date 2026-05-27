@@ -47,6 +47,10 @@ def test_default_active_camera_is_none():
     w = World()
     assert w.active_camera is None
 
+def test_default_name_is_world():
+    w = World()
+    assert w.name == "world"
+
 
 # ─── Add / remove objects ─────────────────────────────────────────────────────
 
@@ -123,6 +127,11 @@ def test_background_color_setter():
     w = World()
     w.background_color = Color(0.1, 0.2, 0.3)
     assert vec3_approx_eq(w.background_color, Color(0.1, 0.2, 0.3))
+
+def test_name_round_trips_through_dict():
+    w = World(name="shotWorld", use_sky=False)
+    restored = World.from_dict(w.to_dict())
+    assert restored.name == "shotWorld"
 
 
 # ─── intersect ────────────────────────────────────────────────────────────────
@@ -203,6 +212,7 @@ if __name__ == "__main__":
         test_default_empty_cameras,
         test_default_background_is_black,
         test_default_active_camera_is_none,
+        test_default_name_is_world,
         test_add_object_increases_count,
         test_add_multiple_objects,
         test_remove_object_decreases_count,
@@ -213,6 +223,7 @@ if __name__ == "__main__":
         test_remove_active_camera_clears_to_next,
         test_remove_last_camera_sets_active_none,
         test_background_color_setter,
+        test_name_round_trips_through_dict,
         test_intersect_empty_world_returns_none,
         test_intersect_hits_object,
         test_intersect_misses_returns_none,

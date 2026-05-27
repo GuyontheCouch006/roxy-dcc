@@ -7,7 +7,7 @@
 # ============================================
 
 from core import Color, Mat4x4, Vec3
-from scene import Diffuse, SceneObject, Sphere, World
+from scene import Camera, Diffuse, SceneObject, Sphere, World
 from tests.utils import approx_eq, run_tests, vec3_approx_eq
 
 
@@ -340,6 +340,57 @@ def test_session_returns_stable_non_object_handles_and_payload_selection():
     assert session.selected_raw_payload() is mat
 
 
+def test_session_assigns_unique_names_to_scriptable_nodes():
+    first_mat = Diffuse(Color(0.2, 0.3, 0.4))
+    second_mat = Diffuse(Color(0.7, 0.7, 0.7))
+    first = SceneObject(shape=Sphere(1.0), material=first_mat)
+    second = SceneObject(shape=Sphere(1.0), material=second_mat, name="transform")
+    world = World(
+        objects=[first, second],
+        cameras=[Camera(name="camera"), Camera(name="camera")],
+        use_sky=False,
+    )
+
+    session = _session(world)
+
+    assert world.name == "world"
+    assert first.name == "transform"
+    assert first.shapes[0].name == "transformShape"
+    assert first_mat.name == "diffuse"
+    assert second.name == "transform1"
+    assert second.shapes[0].name == "transform1Shape"
+    assert second_mat.name == "diffuse1"
+    assert [camera.name for camera in world.cameras] == ["camera", "camera1"]
+    assert session.node("world").raw is world
+    assert session.node("transform").raw is first
+    assert session.node("transformShape").raw is first.shapes[0]
+    assert session.node("diffuse1").raw is second_mat
+    assert [handle.name for handle in session.nodes(kind="camera")] == ["camera", "camera1"]
+
+
+def test_renaming_by_api_keeps_node_lookup_unique():
+    mat = Diffuse(Color(0.2, 0.3, 0.4), name="mat")
+    root = SceneObject(name="root")
+    child = SceneObject(shape=Sphere(1.0), material=mat, name="child")
+    root.add_child(child)
+    world = World(objects=[root], use_sky=False)
+    session = _session(world)
+
+    assert child.name == "child"
+    assert child.shapes[0].name == "childShape"
+
+    session.object(child).set_attr("name", "root")
+
+    assert child.name == "root1"
+    assert session.node("root").raw is root
+    assert session.node("root1").raw is child
+
+    session.shape(child.shapes[0]).set_attr("name", "")
+
+    assert child.shapes[0].name == "root1Shape"
+    assert session.node("root1Shape").raw is child.shapes[0]
+
+
 def test_handle_set_attr_and_shader_assignment_are_undoable():
     old_mat = Diffuse(Color(0.2, 0.3, 0.4), name="oldMat")
     new_mat = Diffuse(Color(0.7, 0.7, 0.7), name="newMat")
@@ -396,6 +447,8 @@ if __name__ == "__main__":
         test_undo_disabled_records_no_history,
         test_undo_depth_trims_oldest_entries,
         test_session_returns_stable_non_object_handles_and_payload_selection,
+        test_session_assigns_unique_names_to_scriptable_nodes,
+        test_renaming_by_api_keeps_node_lookup_unique,
         test_handle_set_attr_and_shader_assignment_are_undoable,
         test_connect_attr_rejects_invalid_connections,
     ])

@@ -67,3 +67,11 @@ class HistoryNodeHandle(ScenePayloadHandle):
     @property
     def history_node(self):
         return self._raw
+
+
+class WorldHandle(ScenePayloadHandle):
+    kind = "world"
+
+    @property
+    def world(self):
+        return self._raw

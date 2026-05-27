@@ -132,7 +132,15 @@ def test_menu_script_create_light_adds_emissive_object():
     assert handle.raw in window.session.world.objects
 
 
-def test_versioned_scene_path_increments_maya_style_suffix(tmp_path):
+def test_versioned_scene_path_increments_maya_style_suffix(tmp_path=None):
+    if tmp_path is None:
+        with tempfile.TemporaryDirectory() as tmp:
+            _assert_versioned_scene_path_increments_maya_style_suffix(Path(tmp))
+        return
+    _assert_versioned_scene_path_increments_maya_style_suffix(tmp_path)
+
+
+def _assert_versioned_scene_path_increments_maya_style_suffix(tmp_path):
     base = tmp_path / "shot_v003.rxa"
     next_path = versioned_scene_path(base)
     assert next_path == tmp_path / "shot_v004.rxa"
@@ -149,10 +157,6 @@ def _ensure_qapp():
 
 
 if __name__ == "__main__":
-    def _versioned_path_smoke():
-        with tempfile.TemporaryDirectory() as tmp:
-            test_versioned_scene_path_increments_maya_style_suffix(Path(tmp))
-
     run_tests([
         test_main_window_builds_file_and_create_menus,
         test_new_scene_command_creates_empty_scene_with_default_camera,
@@ -161,5 +165,5 @@ if __name__ == "__main__":
         test_create_parameter_fields_do_not_expose_material_color,
         test_menu_script_create_torus_is_viewport_only_until_intersection_exists,
         test_menu_script_create_light_adds_emissive_object,
-        _versioned_path_smoke,
+        test_versioned_scene_path_increments_maya_style_suffix,
     ])

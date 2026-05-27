@@ -25,10 +25,12 @@ class World:
         cameras=None,
         background_color=None,
         use_sky=True,
+        name="world",
     ):
         self._objects = objects if objects is not None else []
         self._lights = lights if lights is not None else []
         self._cameras = cameras if cameras is not None else []
+        self._name = str(name) if name else "world"
         self._background_color = (
             background_color if background_color is not None else Color(0, 0, 0)
         )
@@ -66,6 +68,12 @@ class World:
             self._active_camera = self._cameras[0] if self._cameras else None
 
     # ─── Properties ───────────────────────────────────────────────────────────
+
+    @property
+    def name(self): return self._name
+
+    @name.setter
+    def name(self, value): self._name = str(value) if value else "world"
 
     @property
     def use_sky(self): return self._use_sky
@@ -143,6 +151,7 @@ class World:
 
     def to_dict(self):
         return {
+            "name": self._name,
             "objects": [obj.to_dict() for obj in self._objects],
             "lights": [],  # TODO: implement lights
             "cameras": [cam.to_dict() for cam in self._cameras],
@@ -155,6 +164,7 @@ class World:
         world = cls(
             background_color=Color.from_dict(data["background_color"]),
             use_sky=data["use_sky"],
+            name=data.get("name", "world"),
         )
         for obj_data in data["objects"]:
             world.add_object(SceneObject.from_dict(obj_data))
