@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from core import AABB, Vec3
+from core import AABB, Color, Vec3
 from scene.commands import (
     AddObjectsCommand,
     AssignMaterialCommand,
@@ -32,6 +32,7 @@ from scene.node_handles import (
 from scene.object_handle import ObjectHandle
 from scene.scene_object import SceneObject
 from scene.shape import Shape
+from scene.textures import ImageTexture
 from scene.transform_ops import (
     apply_absolute_matrix,
     apply_relative_matrix,
@@ -905,8 +906,13 @@ class SceneSession:
         if isinstance(target, Material):
             if attr_name == "name":
                 return target.name
-            if attr_name == "albedo":
+            if attr_name in ("albedo", "color"):
                 return target._albedo
+            if attr_name == "albedo_texture":
+                return target._albedo_texture
+            if attr_name == "albedo_texture_flip_v":
+                texture = target._albedo_texture
+                return True if texture is None else texture.flip_v
             if attr_name in ("roughness", "ior", "intensity"):
                 return getattr(target, f"_{attr_name}")
         if isinstance(target, Camera):
@@ -925,8 +931,16 @@ class SceneSession:
         raise ValueError(f"Unsupported attribute {attr_name!r}")
 
     def _coerce_attr_value(self, target, attr_name, value):
-        if str(attr_name) == "name" and hasattr(target, "name"):
+        attr_name = str(attr_name)
+        if attr_name == "name" and hasattr(target, "name"):
             return self._unique_node_name(value, target)
+        if isinstance(target, Material):
+            if attr_name in ("albedo", "color"):
+                return _coerce_color(value)
+            if attr_name == "albedo_texture":
+                return _coerce_texture(value, current=target._albedo_texture)
+            if attr_name == "albedo_texture_flip_v":
+                return bool(value)
         return value
 
     def _apply_attr_raw(self, target, attr_name, value):
@@ -943,8 +957,14 @@ class SceneSession:
         if isinstance(target, Material):
             if attr_name == "name":
                 target.name = value
-            elif attr_name == "albedo":
+            elif attr_name in ("albedo", "color"):
                 target._albedo = value
+            elif attr_name == "albedo_texture":
+                target._albedo_texture = value
+            elif attr_name == "albedo_texture_flip_v":
+                if target._albedo_texture is None:
+                    raise ValueError("Cannot set texture flip without an albedo texture")
+                target._albedo_texture.flip_v = bool(value)
             elif attr_name in ("roughness", "ior", "intensity"):
                 setattr(target, f"_{attr_name}", value)
             else:
@@ -1004,6 +1024,28 @@ def _split_plug(path):
 
 def _material_display_name(material):
     return material.name or f"{type(material).__name__}_{id(material):x}"
+
+
+def _coerce_color(value):
+    if isinstance(value, Color):
+        return value
+    if isinstance(value, Vec3):
+        return Color(value.x, value.y, value.z)
+    if isinstance(value, (tuple, list)) and len(value) == 3:
+        return Color(float(value[0]), float(value[1]), float(value[2]))
+    raise TypeError("Expected a Color or 3-number color tuple")
+
+
+def _coerce_texture(value, current=None):
+    if value is None or value == "":
+        return None
+    if isinstance(value, ImageTexture):
+        return value
+    if isinstance(value, str):
+        if current is not None and getattr(current, "path", None) == value:
+            return current
+        return ImageTexture(value)
+    raise TypeError("Expected an ImageTexture, texture path, or empty value")
 
 
 def _geometry_attrs(geometry):

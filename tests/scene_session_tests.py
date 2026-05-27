@@ -8,6 +8,7 @@
 
 from core import Color, Mat4x4, Vec3
 from scene import Camera, Diffuse, SceneObject, Sphere, World
+from scene.textures import ImageTexture
 from tests.utils import approx_eq, run_tests, vec3_approx_eq
 
 
@@ -417,6 +418,27 @@ def test_handle_set_attr_and_shader_assignment_are_undoable():
     assert approx_eq(obj.shape._radius, 1.0)
 
 
+def test_material_texture_parameters_are_api_editable_and_undoable():
+    mat = Diffuse(Color(0.2, 0.3, 0.4), name="mat")
+    obj = SceneObject(shape=Sphere(1.0), material=mat, name="ball")
+    world = World(objects=[obj], use_sky=False)
+    session = _session(world)
+    material_handle = session.material("mat")
+
+    material_handle.set_attr("albedo_texture", "/tmp/albedo.png")
+    material_handle.set_attr("albedo_texture_flip_v", False)
+
+    assert isinstance(mat._albedo_texture, ImageTexture)
+    assert mat._albedo_texture.path == "/tmp/albedo.png"
+    assert mat._albedo_texture.flip_v is False
+
+    session.undo()
+    assert mat._albedo_texture.flip_v is True
+
+    session.undo()
+    assert mat._albedo_texture is None
+
+
 def test_connect_attr_rejects_invalid_connections():
     mat = Diffuse(Color(0.2, 0.3, 0.4), name="mat")
     obj = SceneObject(shape=Sphere(1.0), material=mat, name="ball")
@@ -450,5 +472,6 @@ if __name__ == "__main__":
         test_session_assigns_unique_names_to_scriptable_nodes,
         test_renaming_by_api_keeps_node_lookup_unique,
         test_handle_set_attr_and_shader_assignment_are_undoable,
+        test_material_texture_parameters_are_api_editable_and_undoable,
         test_connect_attr_rejects_invalid_connections,
     ])

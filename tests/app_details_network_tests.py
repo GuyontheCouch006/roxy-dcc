@@ -5,9 +5,12 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6 import QtWidgets
 
 from app.main_window import RoxyMainWindow
+from app.details_panel import ColorSwatchButton
 from app.node_network import NodeNetworkPanel, SceneNodeGraphModel
 from core import Color
 from scene import Diffuse, SceneObject, Sphere, World
+from scene.materials import Dielectric, Emissive, Glossy, Metal
+from scene.textures import ImageTexture
 from tests.utils import run_tests, vec3_approx_eq
 
 
@@ -27,15 +30,76 @@ def test_details_material_edit_goes_through_session_undo():
     window.session.set_selected_payload(red)
     QtWidgets.QApplication.processEvents()
 
-    spin = window.details.findChild(QtWidgets.QDoubleSpinBox, "attr_albedo_r")
-    assert spin is not None
+    swatch = window.details.findChild(ColorSwatchButton, "attr_albedo")
+    assert swatch is not None
+    assert swatch.text() == "#cc1a1a"
 
-    spin.setValue(0.9)
+    swatch.set_color(Color(0.9, 0.1, 0.1), emit=True)
     QtWidgets.QApplication.processEvents()
 
     assert red._albedo.r == 0.9
     assert window.session.undo()
     assert vec3_approx_eq(red._albedo, Color(0.8, 0.1, 0.1))
+
+
+def test_details_exposes_shader_parameters_and_texture_controls():
+    _ensure_qapp()
+    metal = Metal(
+        Color(0.2, 0.3, 0.4),
+        roughness=0.35,
+        albedo_texture=ImageTexture("/tmp/albedo.png", flip_v=False),
+        name="metalShader",
+    )
+    dielectric = Dielectric(Color(1.0, 1.0, 1.0), ior=1.33, name="glassShader")
+    emissive = Emissive(Color(1.0, 0.8, 0.5), intensity=6.0, name="lightShader")
+    glossy = Glossy(Color(0.4, 0.5, 0.6), roughness=0.7, name="glossyShader")
+    world = World(
+        objects=[
+            SceneObject(shape=Sphere(1.0), material=metal, name="metalBall"),
+            SceneObject(shape=Sphere(1.0), material=dielectric, name="glassBall"),
+            SceneObject(shape=Sphere(1.0), material=emissive, name="lightBall"),
+            SceneObject(shape=Sphere(1.0), material=glossy, name="glossyBall"),
+        ],
+        use_sky=False,
+    )
+    window = RoxyMainWindow(world)
+
+    window.session.set_selected_payload(metal)
+    QtWidgets.QApplication.processEvents()
+
+    assert isinstance(window.details.widget_for_attr("albedo"), ColorSwatchButton)
+    assert window.details.widget_for_attr("roughness").value() == 0.35
+    assert window.details.widget_for_attr("albedo_texture").text() == "/tmp/albedo.png"
+    assert not window.details.widget_for_attr("albedo_texture_flip_v").isChecked()
+
+    window.session.set_selected_payload(dielectric)
+    QtWidgets.QApplication.processEvents()
+    assert window.details.widget_for_attr("ior").value() == 1.33
+
+    window.session.set_selected_payload(emissive)
+    QtWidgets.QApplication.processEvents()
+    assert window.details.widget_for_attr("intensity").value() == 6.0
+
+    window.session.set_selected_payload(glossy)
+    QtWidgets.QApplication.processEvents()
+    assert window.details.widget_for_attr("roughness").value() == 0.7
+
+
+def test_details_texture_path_edits_go_through_session_undo():
+    _ensure_qapp()
+    world, _left, _right, red, _blue = _world_with_two_materials()
+    window = RoxyMainWindow(world)
+    window.session.set_selected_payload(red)
+    QtWidgets.QApplication.processEvents()
+
+    texture_field = window.details.widget_for_attr("albedo_texture")
+    texture_field.setText("/tmp/new_albedo.png")
+    texture_field.editingFinished.emit()
+    QtWidgets.QApplication.processEvents()
+
+    assert red._albedo_texture.path == "/tmp/new_albedo.png"
+    assert window.session.undo()
+    assert red._albedo_texture is None
 
 
 def test_node_graph_contains_history_and_shader_edges():
@@ -101,6 +165,8 @@ if __name__ == "__main__":
     run_tests([
         test_main_window_hosts_details_dock_and_leaves_node_network_hidden,
         test_details_material_edit_goes_through_session_undo,
+        test_details_exposes_shader_parameters_and_texture_controls,
+        test_details_texture_path_edits_go_through_session_undo,
         test_node_graph_contains_history_and_shader_edges,
         test_node_network_scaffold_shader_rewire_uses_api_and_is_undoable,
         test_selecting_shape_in_outliner_updates_details_without_viewport_selection,

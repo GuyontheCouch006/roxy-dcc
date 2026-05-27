@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6 import QtWidgets
+from PySide6 import QtCore, QtGui, QtWidgets
 
 from core import Color, Vec3
 from scene import Camera, SceneObject
@@ -8,6 +8,54 @@ from scene.history import GeometrySourceNode
 from scene.materials import Dielectric, Emissive, Glossy, Material, Metal
 from scene.shape import Shape
 from scene.world import World
+
+
+class ColorSwatchButton(QtWidgets.QPushButton):
+    """Clickable color field that edits a Color through QColorDialog."""
+
+    colorChanged = QtCore.Signal(object)
+
+    def __init__(self, color, parent=None):
+        super().__init__(parent)
+        self._color = _coerce_color(color)
+        self.setMinimumHeight(24)
+        self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        self.clicked.connect(self._choose_color)
+        self._refresh()
+
+    @property
+    def color(self):
+        return self._color
+
+    def set_color(self, color, emit=False):
+        self._color = _coerce_color(color)
+        self._refresh()
+        if emit:
+            self.colorChanged.emit(self._color)
+
+    def _choose_color(self):
+        selected = QtWidgets.QColorDialog.getColor(
+            _to_qcolor(self._color),
+            self,
+            "Choose Color",
+        )
+        if selected.isValid():
+            self.set_color(_from_qcolor(selected), emit=True)
+
+    def _refresh(self):
+        hex_color = _color_hex(self._color)
+        self.setText(hex_color)
+        text_color = "#111111" if _luminance(self._color) > 0.55 else "#ffffff"
+        self.setStyleSheet(
+            "QPushButton {"
+            f" background-color: {hex_color};"
+            f" color: {text_color};"
+            " border: 1px solid rgba(255, 255, 255, 80);"
+            " border-radius: 3px;"
+            " padding: 3px 8px;"
+            " text-align: center;"
+            "}"
+        )
 
 
 class DetailsPanel(QtWidgets.QWidget):
@@ -102,13 +150,24 @@ class DetailsPanel(QtWidgets.QWidget):
                         self._add_float(name, value, minimum=-1_000_000.0)
             elif isinstance(payload, Material):
                 self._add_text("name", payload.name)
-                self._add_vec3("albedo", payload._albedo, color=True)
-                if isinstance(payload, (Metal, Glossy)):
-                    self._add_float("roughness", payload._roughness, minimum=0.0, maximum=1.0)
-                if isinstance(payload, Dielectric):
-                    self._add_float("ior", payload._ior, minimum=1.0)
-                if isinstance(payload, Emissive):
-                    self._add_float("intensity", payload._intensity, minimum=0.0)
+                for spec in _material_parameter_specs(payload):
+                    attr_name = spec["attr"]
+                    value = spec["value"]
+                    label = spec.get("label")
+                    if spec["type"] == "color":
+                        self._add_color(attr_name, value, label=label)
+                    elif spec["type"] == "float":
+                        self._add_float(
+                            attr_name,
+                            value,
+                            minimum=spec.get("minimum", -1_000_000.0),
+                            maximum=spec.get("maximum", 1_000_000.0),
+                            label=label,
+                        )
+                    elif spec["type"] == "bool":
+                        self._add_bool(attr_name, value, label=label)
+                    elif spec["type"] == "texture":
+                        self._add_text(attr_name, _texture_path(value), label=label)
             elif isinstance(payload, Camera):
                 self._add_text("name", payload.name)
                 self._add_vec3("position", payload.position)
@@ -121,18 +180,18 @@ class DetailsPanel(QtWidgets.QWidget):
             elif isinstance(payload, World):
                 self._add_text("name", payload.name)
                 self._add_bool("use_sky", payload.use_sky)
-                self._add_vec3("background_color", payload.background_color, color=True)
+                self._add_color("background_color", payload.background_color)
         finally:
             self._building = False
 
-    def _add_text(self, attr_name, value):
+    def _add_text(self, attr_name, value, label=None):
         widget = QtWidgets.QLineEdit(str(value or ""))
         widget.setObjectName(f"attr_{attr_name}")
         widget.editingFinished.connect(
             lambda name=attr_name, w=widget: self._set_attr(name, w.text())
         )
         self._widgets[attr_name] = widget
-        self._form.addRow(_label(attr_name), widget)
+        self._form.addRow(label or _label(attr_name), widget)
 
     def _add_readonly(self, attr_name, value):
         widget = QtWidgets.QLineEdit(str(value or ""))
@@ -141,15 +200,22 @@ class DetailsPanel(QtWidgets.QWidget):
         self._widgets[attr_name] = widget
         self._form.addRow(_label(attr_name), widget)
 
-    def _add_bool(self, attr_name, value):
+    def _add_bool(self, attr_name, value, label=None):
         widget = QtWidgets.QCheckBox()
         widget.setObjectName(f"attr_{attr_name}")
         widget.setChecked(bool(value))
         widget.toggled.connect(lambda checked, name=attr_name: self._set_attr(name, bool(checked)))
         self._widgets[attr_name] = widget
-        self._form.addRow(_label(attr_name), widget)
+        self._form.addRow(label or _label(attr_name), widget)
 
-    def _add_float(self, attr_name, value, minimum=-1_000_000.0, maximum=1_000_000.0):
+    def _add_float(
+        self,
+        attr_name,
+        value,
+        minimum=-1_000_000.0,
+        maximum=1_000_000.0,
+        label=None,
+    ):
         widget = QtWidgets.QDoubleSpinBox()
         widget.setObjectName(f"attr_{attr_name}")
         widget.setDecimals(4)
@@ -157,18 +223,29 @@ class DetailsPanel(QtWidgets.QWidget):
         widget.setValue(float(value))
         widget.valueChanged.connect(lambda new, name=attr_name: self._set_attr(name, float(new)))
         self._widgets[attr_name] = widget
-        self._form.addRow(_label(attr_name), widget)
+        self._form.addRow(label or _label(attr_name), widget)
+
+    def _add_color(self, attr_name, value, label=None):
+        widget = ColorSwatchButton(value)
+        widget.setObjectName(f"attr_{attr_name}")
+        widget.colorChanged.connect(lambda color, name=attr_name: self._set_attr(name, color))
+        self._widgets[attr_name] = widget
+        self._form.addRow(label or _label(attr_name), widget)
 
     def _add_vec3(self, attr_name, value, color=False):
+        if color:
+            self._add_color(attr_name, value)
+            return
+
         row = QtWidgets.QWidget()
         layout = QtWidgets.QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
-        components = ("r", "g", "b") if color else ("x", "y", "z")
+        components = ("x", "y", "z")
         spinboxes = []
         for component in components:
             spin = QtWidgets.QDoubleSpinBox()
             spin.setDecimals(4)
-            spin.setRange(0.0 if color else -1_000_000.0, 1.0 if color else 1_000_000.0)
+            spin.setRange(-1_000_000.0, 1_000_000.0)
             spin.setValue(float(getattr(value, component)))
             spin.setObjectName(f"attr_{attr_name}_{component}")
             layout.addWidget(spin)
@@ -202,6 +279,92 @@ def _value_from_spinboxes(spinboxes, is_color):
     if is_color:
         return Color(*values)
     return Vec3(*values)
+
+
+def _material_parameter_specs(material):
+    specs = [
+        {
+            "attr": "albedo",
+            "label": "Color" if isinstance(material, Emissive) else "Albedo",
+            "type": "color",
+            "value": material._albedo,
+        },
+        {
+            "attr": "albedo_texture",
+            "label": "Albedo Texture",
+            "type": "texture",
+            "value": material._albedo_texture,
+        },
+    ]
+
+    if material._albedo_texture is not None:
+        specs.append({
+            "attr": "albedo_texture_flip_v",
+            "label": "Flip Texture V",
+            "type": "bool",
+            "value": material._albedo_texture.flip_v,
+        })
+
+    if isinstance(material, (Metal, Glossy)):
+        specs.append({
+            "attr": "roughness",
+            "type": "float",
+            "value": material._roughness,
+            "minimum": 0.0,
+            "maximum": 1.0,
+        })
+    if isinstance(material, Dielectric):
+        specs.append({
+            "attr": "ior",
+            "label": "IOR",
+            "type": "float",
+            "value": material._ior,
+            "minimum": 1.0,
+        })
+    if isinstance(material, Emissive):
+        specs.append({
+            "attr": "intensity",
+            "type": "float",
+            "value": material._intensity,
+            "minimum": 0.0,
+        })
+    return specs
+
+
+def _texture_path(texture):
+    return "" if texture is None else getattr(texture, "path", "") or ""
+
+
+def _coerce_color(color):
+    return Color(float(color.r), float(color.g), float(color.b))
+
+
+def _to_qcolor(color):
+    return QtGui.QColor.fromRgbF(
+        _clamp01(color.r),
+        _clamp01(color.g),
+        _clamp01(color.b),
+    )
+
+
+def _from_qcolor(color):
+    return Color(color.redF(), color.greenF(), color.blueF())
+
+
+def _color_hex(color):
+    return _to_qcolor(color).name(QtGui.QColor.NameFormat.HexRgb)
+
+
+def _luminance(color):
+    return (
+        0.2126 * _clamp01(color.r)
+        + 0.7152 * _clamp01(color.g)
+        + 0.0722 * _clamp01(color.b)
+    )
+
+
+def _clamp01(value):
+    return max(0.0, min(1.0, float(value)))
 
 
 def _geometry_attrs(geometry):
