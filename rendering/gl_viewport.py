@@ -409,6 +409,42 @@ def build_scene_viewport_buffers(world, default_color=(0.62, 0.66, 0.70)):
     )
 
 
+def build_selection_overlay_vertices(
+    scene_buffers,
+    scene_objects,
+    color=(1.0, 0.63, 0.12),
+):
+    """Build unlit position/color vertices for selected-object overlays."""
+    if scene_buffers is None or scene_buffers.is_empty:
+        return np.empty((0, 6), dtype=np.float32)
+
+    spans = [
+        span
+        for scene_object in scene_objects or ()
+        for span in (scene_buffers.span_for(scene_object),)
+        if span is not None and span.count > 0
+    ]
+    if not spans:
+        return np.empty((0, 6), dtype=np.float32)
+
+    vertices = np.concatenate(
+        [
+            scene_buffers.vertices[span.start:span.start + span.count]
+            for span in spans
+        ],
+        axis=0,
+    )
+    colors = np.repeat(
+        np.asarray([color], dtype=np.float32),
+        len(vertices),
+        axis=0,
+    )
+    return np.concatenate([vertices, colors], axis=1).astype(
+        np.float32,
+        copy=False,
+    )
+
+
 class GLViewport:
     """OpenGL window for path-traced images and direct scene previews."""
 
@@ -809,24 +845,18 @@ class GLViewport:
         if span is None or span.count <= 0:
             return
 
-        start = span.start
-        end = start + span.count
-        vertices = self._scene_buffers.vertices[start:end]
-        normals = self._scene_buffers.normals[start:end]
-        colors = np.repeat(
-            np.asarray([[1.0, 0.63, 0.12]], dtype=np.float32),
-            span.count,
-            axis=0,
+        interleaved = build_selection_overlay_vertices(
+            self._scene_buffers,
+            (self._selected_object,),
         )
-        interleaved = np.concatenate([vertices, normals, colors], axis=1).astype(
-            np.float32,
-            copy=False,
-        )
-        self._selection_vertex_count = span.count
+        if len(interleaved) == 0:
+            return
+
+        self._selection_vertex_count = len(interleaved)
         self._selection_vbo = self._ctx.buffer(interleaved.tobytes())
         self._selection_vao = self._ctx.vertex_array(
-            self._scene_program,
-            [(self._selection_vbo, "3f 3f 3f", "in_position", "in_normal", "in_color")],
+            self._grid_program,
+            [(self._selection_vbo, "3f 3f", "in_position", "in_color")],
         )
 
     def _upload_gizmo_buffers(self):

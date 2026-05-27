@@ -19,6 +19,7 @@ from rendering.gl_viewport import (
     _pinch_view_action,
     _scroll_wheel_view_action,
     build_scene_viewport_buffers,
+    build_selection_overlay_vertices,
     gizmo_axis_rotation_matrix,
     gizmo_axis_scale_matrix,
     move_gizmo_drag_delta,
@@ -484,7 +485,7 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             self._gl.glDisable(GL_DEPTH_TEST)
             self._set_wireframe(True)
             self._render_vertices(
-                self._scene_program,
+                self._grid_program,
                 self._selection_vao,
                 GL_TRIANGLES,
                 self._selection_vertex_count,
@@ -835,47 +836,20 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         ):
             return
 
-        spans = [
-            span
-            for scene_object in self._highlight_objects
-            for span in (self._scene_buffers.span_for(scene_object),)
-            if span is not None and span.count > 0
-        ]
-        if not spans:
+        interleaved = build_selection_overlay_vertices(
+            self._scene_buffers,
+            self._highlight_objects,
+        )
+        if len(interleaved) == 0:
             return
 
-        vertices = np.concatenate(
-            [
-                self._scene_buffers.vertices[span.start:span.start + span.count]
-                for span in spans
-            ],
-            axis=0,
-        )
-        normals = np.concatenate(
-            [
-                self._scene_buffers.normals[span.start:span.start + span.count]
-                for span in spans
-            ],
-            axis=0,
-        )
-        vertex_count = len(vertices)
-        colors = np.repeat(
-            np.asarray([[1.0, 0.63, 0.12]], dtype=np.float32),
-            vertex_count,
-            axis=0,
-        )
-        interleaved = np.concatenate([vertices, normals, colors], axis=1).astype(
-            np.float32,
-            copy=False,
-        )
-        self._selection_vertex_count = vertex_count
+        self._selection_vertex_count = len(interleaved)
         self._selection_vao, self._selection_vbo = self._create_vertex_array(
-            self._scene_program,
+            self._grid_program,
             interleaved,
             (
-                ("in_position", 3, 0, 9 * 4),
-                ("in_normal", 3, 3 * 4, 9 * 4),
-                ("in_color", 3, 6 * 4, 9 * 4),
+                ("in_position", 3, 0, 6 * 4),
+                ("in_color", 3, 3 * 4, 6 * 4),
             ),
         )
 

@@ -11,6 +11,7 @@ from rendering.gl_viewport import (
     _pinch_view_action,
     _scroll_wheel_view_action,
     build_scene_viewport_buffers,
+    build_selection_overlay_vertices,
     gizmo_axis_rotation_matrix,
     gizmo_axis_scale_matrix,
     move_gizmo_drag_delta,
@@ -186,6 +187,21 @@ def test_scene_viewport_buffers_do_not_add_dcc_grid_to_selectable_scene():
 
     assert buffers.triangle_count == 0
     assert buffers.object_spans == ()
+
+
+def test_selection_overlay_vertices_are_unlit_position_color_only():
+    world = _single_triangle_world()
+    obj = world.objects[0]
+    buffers = build_scene_viewport_buffers(world)
+
+    overlay = build_selection_overlay_vertices(buffers, (obj,))
+
+    assert overlay.shape == (3, 6)
+    assert np.allclose(overlay[:, :3], buffers.vertices[:3])
+    assert np.allclose(
+        overlay[:, 3:],
+        np.repeat(np.asarray([[1.0, 0.63, 0.12]], dtype=np.float32), 3, axis=0),
+    )
 
 
 def test_pick_scene_object_returns_nearest_object_under_cursor():
@@ -413,6 +429,7 @@ if __name__ == "__main__":
         test_scene_viewport_buffers_extract_indexed_mesh_vertices_and_color,
         test_scene_viewport_buffers_resolve_group_materials_per_triangle,
         test_scene_viewport_buffers_do_not_add_dcc_grid_to_selectable_scene,
+        test_selection_overlay_vertices_are_unlit_position_color_only,
         test_pick_scene_object_returns_nearest_object_under_cursor,
         test_pick_scene_object_skips_non_selectable_objects,
         test_pick_scene_object_allows_user_authored_infinite_planes,
