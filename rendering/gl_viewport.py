@@ -1056,6 +1056,28 @@ def pick_move_gizmo_axis(scene_object, viewport_camera, screen_x, screen_y, widt
     return best
 
 
+def pick_rotate_gizmo_axis(scene_object, viewport_camera, screen_x, screen_y, width, height, threshold=12.0):
+    origin = _object_gizmo_origin(scene_object)
+    size = _object_gizmo_size(scene_object)
+    mouse = np.asarray([screen_x, screen_y], dtype=np.float32)
+    best = None
+    best_distance = float(threshold)
+
+    for axis_name, axis in _gizmo_axes().items():
+        ring = _ring_points(origin, axis, size, segments=64)
+        projected = [viewport_camera.project_point(point, width, height) for point in ring]
+        for i, start in enumerate(projected):
+            end = projected[(i + 1) % len(projected)]
+            if start is None or end is None:
+                continue
+            distance = _screen_segment_distance(mouse, start[:2], end[:2])
+            if distance <= best_distance:
+                best_distance = distance
+                best = (axis_name, axis, origin, size)
+
+    return best
+
+
 def move_gizmo_drag_delta(viewport_camera, origin, axis, size, start_mouse, current_mouse, width, height):
     origin = _as_np3(origin)
     axis = _normalize(axis)
@@ -1075,6 +1097,57 @@ def move_gizmo_drag_delta(viewport_camera, origin, axis, size, start_mouse, curr
     scalar_pixels = float(np.dot(current_mouse - start_mouse, screen_axis))
     world_units = scalar_pixels * (float(size) / screen_length)
     return axis * world_units
+
+
+def scale_gizmo_drag_factor(viewport_camera, origin, axis, size, start_mouse, current_mouse, width, height):
+    delta = move_gizmo_drag_delta(
+        viewport_camera,
+        origin,
+        axis,
+        size,
+        start_mouse,
+        current_mouse,
+        width,
+        height,
+    )
+    units = float(np.dot(delta, _normalize(axis)))
+    return max(0.01, 1.0 + units / max(float(size), 1e-6))
+
+
+def rotate_gizmo_drag_degrees(viewport_camera, origin, axis, start_mouse, current_mouse, width, height):
+    origin = _as_np3(origin)
+    axis = _normalize(axis)
+    start_hit = _screen_ray_plane_hit(viewport_camera, start_mouse, width, height, origin, axis)
+    current_hit = _screen_ray_plane_hit(viewport_camera, current_mouse, width, height, origin, axis)
+    if start_hit is None or current_hit is None:
+        return 0.0
+
+    v0 = _normalize(start_hit - origin)
+    v1 = _normalize(current_hit - origin)
+    if float(np.linalg.norm(v0)) <= 1e-8 or float(np.linalg.norm(v1)) <= 1e-8:
+        return 0.0
+    signed = math.atan2(float(np.dot(axis, np.cross(v0, v1))), float(np.dot(v0, v1)))
+    return math.degrees(signed)
+
+
+def gizmo_axis_rotation_matrix(axis_name, degrees):
+    if axis_name == "x":
+        return Mat4x4.rotation_x(degrees)
+    if axis_name == "y":
+        return Mat4x4.rotation_y(degrees)
+    if axis_name == "z":
+        return Mat4x4.rotation_z(degrees)
+    raise ValueError("axis_name must be 'x', 'y', or 'z'")
+
+
+def gizmo_axis_scale_matrix(axis_name, factor):
+    if axis_name == "x":
+        return Mat4x4.scale(factor, 1.0, 1.0)
+    if axis_name == "y":
+        return Mat4x4.scale(1.0, factor, 1.0)
+    if axis_name == "z":
+        return Mat4x4.scale(1.0, 1.0, factor)
+    raise ValueError("axis_name must be 'x', 'y', or 'z'")
 
 
 def _apply_world_translation(scene_object, world_delta, start_translation=None, start_matrix=None):
@@ -1120,6 +1193,22 @@ def _screen_segment_distance(point, start, end):
     t = _clamp(float(np.dot(point - start, segment) / length_sq), 0.0, 1.0)
     closest = start + segment * t
     return float(np.linalg.norm(point - closest))
+
+
+def _screen_ray_plane_hit(viewport_camera, screen, width, height, plane_origin, plane_normal):
+    screen = np.asarray(screen, dtype=np.float32)
+    ray = viewport_camera.screen_ray(float(screen[0]), float(screen[1]), width, height)
+    ray_origin = _vec3_to_np(ray.origin)
+    ray_direction = _vec3_to_np(ray.direction)
+    plane_origin = _as_np3(plane_origin)
+    plane_normal = _normalize(plane_normal)
+    denom = float(np.dot(ray_direction, plane_normal))
+    if abs(denom) <= 1e-8:
+        return None
+    t = float(np.dot(plane_origin - ray_origin, plane_normal) / denom)
+    if t <= 0.0:
+        return None
+    return ray_origin + ray_direction * t
 
 
 def _extract_shape_arrays(obj, shape, default_color):
@@ -1247,13 +1336,11 @@ def _walk_objects(objects):
 
 
 def _object_gizmo_origin(scene_object):
+    pivot = getattr(scene_object, "pivot", Vec3(0, 0, 0))
     try:
-        bounds = scene_object.world_aabb
+        return _vec3_to_np(scene_object.world_matrix.transform_point(pivot))
     except Exception:
-        bounds = None
-    if bounds is not None:
-        return _vec3_to_np((bounds.min + bounds.max) * 0.5)
-    return _vec3_to_np(scene_object.world_matrix.transform_point(Vec3(0, 0, 0)))
+        return _vec3_to_np(scene_object.world_matrix.transform_point(Vec3(0, 0, 0)))
 
 
 def _object_gizmo_size(scene_object):
@@ -1327,13 +1414,19 @@ def _append_scale_handle(lines, end, axis, color, size):
 
 
 def _append_ring(lines, origin, normal, color, radius, segments=64):
+    points = _ring_points(origin, normal, radius, segments=segments)
+    for i in range(segments):
+        _append_line(lines, points[i], points[(i + 1) % segments], color)
+
+
+def _ring_points(origin, normal, radius, segments=64):
+    origin = _as_np3(origin)
     basis_a, basis_b = _axis_perpendiculars(normal)
     points = []
     for i in range(segments):
         angle = (i / segments) * math.tau
         points.append(origin + (basis_a * math.cos(angle) + basis_b * math.sin(angle)) * radius)
-    for i in range(segments):
-        _append_line(lines, points[i], points[(i + 1) % segments], color)
+    return points
 
 
 def _axis_perpendiculars(axis):

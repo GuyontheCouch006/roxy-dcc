@@ -54,6 +54,7 @@ class SceneGraphModel(QtCore.QAbstractItemModel):
     def __init__(self, world=None, parent=None):
         super().__init__(parent)
         self._world = world
+        self._session = None
         self._root = self._build_tree(world)
 
     @property
@@ -65,6 +66,10 @@ class SceneGraphModel(QtCore.QAbstractItemModel):
         self._world = world
         self._root = self._build_tree(world)
         self.endResetModel()
+
+    def set_session(self, session):
+        self._session = session
+        self.set_world(session.world if session is not None else None)
 
     def refresh(self):
         self.set_world(self._world)
@@ -139,9 +144,13 @@ class SceneGraphModel(QtCore.QAbstractItemModel):
             and index.column() == 0
             and node.kind == "object"
         ):
-            node.payload.visible = _check_state_value(value) == _check_state_value(
+            visible = _check_state_value(value) == _check_state_value(
                 QtCore.Qt.CheckState.Checked
             )
+            if self._session is not None:
+                self._session.set_object_visible(node.payload, visible)
+            else:
+                node.payload.visible = visible
             self.dataChanged.emit(index, index, [role])
             return True
         return False
@@ -192,6 +201,14 @@ class SceneGraphModel(QtCore.QAbstractItemModel):
             for node in self._iter_subtree(self.node_from_index(index))
             if node.kind == "object" and node.payload is not None
         )
+
+    def scene_object_for_index(self, index):
+        if not index.isValid():
+            return None
+        node = self.node_from_index(index)
+        if node.kind == "object":
+            return node.payload
+        return None
 
     def iter_nodes(self, kind=None):
         def walk(node):

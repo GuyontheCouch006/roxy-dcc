@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 from PySide6 import QtCore, QtGui, QtOpenGL, QtOpenGLWidgets, QtWidgets
 
@@ -8,22 +10,24 @@ from rendering.gl_viewport import (
     GRID_VERTEX_SHADER,
     SCENE_FRAGMENT_SHADER,
     SCENE_VERTEX_SHADER,
-    MoveGizmoDrag,
     ViewportCamera,
-    _apply_world_translation,
     _build_gizmo_vertices,
     _build_grid_vertices,
-    _copy_matrix,
     _object_gizmo_origin,
     _object_gizmo_size,
     _pinch_view_action,
     _scroll_wheel_view_action,
     build_scene_viewport_buffers,
+    gizmo_axis_rotation_matrix,
+    gizmo_axis_scale_matrix,
     move_gizmo_drag_delta,
     pick_move_gizmo_axis,
+    pick_rotate_gizmo_axis,
     pick_scene_object,
+    rotate_gizmo_drag_degrees,
+    scale_gizmo_drag_factor,
 )
-from scene import SceneObject
+from scene import SceneObject, SceneSession
 
 
 GL_COLOR_BUFFER_BIT = 0x00004000
@@ -51,12 +55,22 @@ def configure_default_gl_format():
 configure_default_gl_format()
 
 
+@dataclass
+class TransformGizmoDrag:
+    mode: str
+    axis_name: str
+    axis: np.ndarray
+    origin: np.ndarray
+    size: float
+    start_mouse: np.ndarray
+
+
 class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
     objectSelected = QtCore.Signal(object)
     renderRequested = QtCore.Signal()
     sceneChanged = QtCore.Signal()
 
-    def __init__(self, world=None, sync_camera=False, parent=None):
+    def __init__(self, world=None, sync_camera=False, parent=None, session=None):
         super().__init__(parent)
         self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -67,11 +81,14 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         )
 
         self._world = None
+        self._session = None
+        self._owns_session = False
         self._sync_camera = bool(sync_camera)
         self._camera = ViewportCamera()
         self._scene_buffers = None
         self._selected_object = None
         self._selected_objects = ()
+        self._highlight_objects = ()
         self._gizmo_mode = "select"
         self._wireframe = False
 
@@ -94,10 +111,12 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         self._mouse_down_pos = None
         self._last_mouse_pos = None
         self._mouse_dragged = False
-        self._move_drag = None
+        self._transform_drag = None
 
-        if world is not None:
-            self.set_world(world)
+        if session is not None:
+            self.set_session(session)
+        elif world is not None:
+            self.set_session(SceneSession(world), owns_session=True)
 
     @property
     def world(self):
@@ -116,6 +135,10 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         return self._selected_objects
 
     @property
+    def highlighted_objects(self):
+        return self._highlight_objects
+
+    @property
     def gizmo_mode(self):
         return self._gizmo_mode
 
@@ -123,7 +146,53 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
     def scene_buffers(self):
         return self._scene_buffers
 
-    def set_world(self, world, frame=True):
+    @property
+    def session(self):
+        return self._session
+
+    def set_session(self, session, owns_session=False):
+        if self._session is session:
+            return
+        if self._session is not None:
+            self._session.remove_selection_listener(self._on_session_selection_changed)
+            self._session.remove_scene_listener(self._on_session_scene_changed)
+            self._session.remove_world_listener(self._on_session_world_changed)
+        self._session = session
+        self._owns_session = bool(owns_session)
+        if session is None:
+            self.set_world(None)
+            return
+        session.add_selection_listener(self._on_session_selection_changed)
+        session.add_scene_listener(self._on_session_scene_changed)
+        session.add_world_listener(self._on_session_world_changed)
+        self.set_world(session.world, clear_selection=False)
+        self._sync_selection_from_session()
+
+    def _on_session_selection_changed(self, session):
+        del session
+        self._sync_selection_from_session()
+
+    def _on_session_scene_changed(self, session):
+        del session
+        self.refresh_scene_geometry()
+
+    def _on_session_world_changed(self, session):
+        self.set_world(session.world, clear_selection=False)
+        self._sync_selection_from_session()
+
+    def _sync_selection_from_session(self):
+        if self._session is None:
+            return
+        self._set_selected_objects_local(
+            self._session.selected_scene_objects(),
+            active_object=self._session.active_scene_object(),
+            highlight_objects=self._session.highlighted_scene_objects(),
+        )
+
+    def set_world(self, world, frame=True, clear_selection=True):
+        if self._session is None and world is not None:
+            self.set_session(SceneSession(world), owns_session=True)
+            return
         self._world = world
         self._scene_buffers = (
             build_scene_viewport_buffers(world) if world is not None else None
@@ -135,7 +204,8 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         ):
             self._camera.frame_bounds(self._scene_buffers.bounds)
             self._sync_world_camera()
-        self.set_selected_object(None)
+        if clear_selection:
+            self._set_selected_objects_local((), active_object=None)
         self._upload_all_if_ready()
         self.update()
 
@@ -150,6 +220,14 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
     def set_selected_object(self, scene_object, emit=False):
         if scene_object is not None and not isinstance(scene_object, SceneObject):
             scene_object = None
+        if self._session is not None:
+            if scene_object is None:
+                self._session.clear_selection()
+            else:
+                self._session.replace_selection(scene_object)
+            if emit:
+                self.objectSelected.emit(scene_object)
+            return
         self.set_selected_objects(
             (scene_object,) if scene_object is not None else (),
             active_object=scene_object,
@@ -157,16 +235,30 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
         )
 
     def set_selected_objects(self, scene_objects, active_object=None, emit=False):
+        if self._session is not None:
+            self._session.set_selection(scene_objects, active=active_object)
+            if emit:
+                self.objectSelected.emit(active_object)
+            return
+        self._set_selected_objects_local(scene_objects, active_object=active_object, emit=emit)
+
+    def _set_selected_objects_local(self, scene_objects, active_object=None, emit=False, highlight_objects=None):
         selected = _unique_scene_objects(scene_objects)
+        highlight = _unique_scene_objects(highlight_objects if highlight_objects is not None else selected)
         if active_object is not None and active_object not in selected:
             active_object = None
         if active_object is None and len(selected) == 1:
             active_object = selected[0]
 
-        if selected == self._selected_objects and active_object is self._selected_object:
+        if (
+            selected == self._selected_objects
+            and active_object is self._selected_object
+            and highlight == self._highlight_objects
+        ):
             return
         self._selected_objects = selected
         self._selected_object = active_object
+        self._highlight_objects = highlight
         self._upload_selection_if_ready()
         self._upload_gizmo_if_ready()
         self.update()
@@ -187,7 +279,7 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             return
         bounds = self._scene_buffers.bounds
         selected_bounds = None
-        for scene_object in self._selected_objects:
+        for scene_object in self._highlight_objects:
             span = self._scene_buffers.span_for(scene_object)
             if span is not None and span.bounds is not None:
                 selected_bounds = (
@@ -202,7 +294,7 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             self._sync_world_camera()
             self.update()
 
-    def pick_object(self, screen_x, screen_y):
+    def pick_object(self, screen_x, screen_y, toggle=False):
         if self._world is None:
             self.set_selected_object(None, emit=True)
             return None
@@ -214,13 +306,29 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             max(self.width(), 1),
             max(self.height(), 1),
         )
-        self.set_selected_object(result.scene_object if result else None, emit=True)
+        if self._session is not None:
+            if result is not None:
+                if toggle:
+                    self._session.toggle_selection(result.scene_object)
+                else:
+                    self._session.replace_selection(result.scene_object)
+            elif not toggle:
+                self._session.clear_selection()
+            self.objectSelected.emit(self._session.active_scene_object())
+        else:
+            self.set_selected_object(result.scene_object if result else None, emit=True)
         return result
 
     def begin_move_gizmo_drag(self, screen_x, screen_y):
-        if self._selected_object is None or self._gizmo_mode != "move":
+        if self._gizmo_mode != "move":
             return False
-        hit = pick_move_gizmo_axis(
+        return self.begin_transform_gizmo_drag(screen_x, screen_y)
+
+    def begin_transform_gizmo_drag(self, screen_x, screen_y):
+        if self._selected_object is None or self._gizmo_mode not in ("move", "rotate", "scale"):
+            return False
+        picker = pick_rotate_gizmo_axis if self._gizmo_mode == "rotate" else pick_move_gizmo_axis
+        hit = picker(
             self._selected_object,
             self._camera,
             screen_x,
@@ -232,44 +340,81 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             return False
 
         axis_name, axis, origin, size = hit
-        self._move_drag = MoveGizmoDrag(
-            scene_object=self._selected_object,
+        if self._session is None or not self._session.begin_transform(
+            label=f"{self._gizmo_mode.title()} Drag",
+        ):
+            return False
+        self._transform_drag = TransformGizmoDrag(
+            mode=self._gizmo_mode,
             axis_name=axis_name,
             axis=axis,
             origin=origin,
             size=size,
             start_mouse=np.asarray([screen_x, screen_y], dtype=np.float32),
-            start_translation=self._selected_object.translation,
-            start_matrix=_copy_matrix(self._selected_object.local_matrix)
-            if self._selected_object.matrix_mode
-            else None,
         )
         return True
 
     def drag_move_gizmo(self, screen_x, screen_y):
-        if self._move_drag is None:
+        return self.drag_transform_gizmo(screen_x, screen_y)
+
+    def drag_transform_gizmo(self, screen_x, screen_y):
+        if self._transform_drag is None or self._session is None:
             return False
-        delta = move_gizmo_drag_delta(
-            self._camera,
-            self._move_drag.origin,
-            self._move_drag.axis,
-            self._move_drag.size,
-            self._move_drag.start_mouse,
-            np.asarray([screen_x, screen_y], dtype=np.float32),
-            max(self.width(), 1),
-            max(self.height(), 1),
-        )
-        _apply_world_translation(
-            self._move_drag.scene_object,
-            delta,
-            start_translation=self._move_drag.start_translation,
-            start_matrix=self._move_drag.start_matrix,
-        )
-        self.refresh_scene_geometry()
+        drag = self._transform_drag
+        current = np.asarray([screen_x, screen_y], dtype=np.float32)
+        width = max(self.width(), 1)
+        height = max(self.height(), 1)
+        pivot = None
+        if drag.mode == "move":
+            delta = move_gizmo_drag_delta(
+                self._camera,
+                drag.origin,
+                drag.axis,
+                drag.size,
+                drag.start_mouse,
+                current,
+                width,
+                height,
+            )
+            matrix = gizmo_axis_scale_matrix("x", 1.0)
+            matrix.rows[0][3] = float(delta[0])
+            matrix.rows[1][3] = float(delta[1])
+            matrix.rows[2][3] = float(delta[2])
+        elif drag.mode == "rotate":
+            degrees = rotate_gizmo_drag_degrees(
+                self._camera,
+                drag.origin,
+                drag.axis,
+                drag.start_mouse,
+                current,
+                width,
+                height,
+            )
+            matrix = gizmo_axis_rotation_matrix(drag.axis_name, degrees)
+            pivot = drag.origin
+        else:
+            factor = scale_gizmo_drag_factor(
+                self._camera,
+                drag.origin,
+                drag.axis,
+                drag.size,
+                drag.start_mouse,
+                current,
+                width,
+                height,
+            )
+            matrix = gizmo_axis_scale_matrix(drag.axis_name, factor)
+            pivot = drag.origin
+        self._session.preview_transform(matrix, pivot=pivot)
         return True
 
     def end_move_gizmo_drag(self):
-        self._move_drag = None
+        self.end_transform_gizmo_drag()
+
+    def end_transform_gizmo_drag(self):
+        if self._transform_drag is not None and self._session is not None:
+            self._session.finish_transform()
+        self._transform_drag = None
 
     def initializeGL(self):
         self._gl = self.context().functions()
@@ -367,7 +512,7 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             self._last_mouse_pos = pos
             self._mouse_dragged = (
                 event.button() == QtCore.Qt.MouseButton.LeftButton
-                and self.begin_move_gizmo_drag(pos.x(), pos.y())
+                and self.begin_transform_gizmo_drag(pos.x(), pos.y())
             )
             event.accept()
             return
@@ -390,8 +535,8 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             if dx * dx + dy * dy > 16.0:
                 self._mouse_dragged = True
 
-        if self._move_drag is not None:
-            self.drag_move_gizmo(pos.x(), pos.y())
+        if self._transform_drag is not None:
+            self.drag_transform_gizmo(pos.x(), pos.y())
         else:
             self._handle_mouse_drag(rel_x, rel_y)
         event.accept()
@@ -403,12 +548,16 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
                 event.button() == QtCore.Qt.MouseButton.LeftButton
                 and not self._mouse_dragged
             ):
-                self.pick_object(pos.x(), pos.y())
+                self.pick_object(
+                    pos.x(),
+                    pos.y(),
+                    toggle=bool(event.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier),
+                )
             self._drag_button = QtCore.Qt.MouseButton.NoButton
             self._mouse_down_pos = None
             self._last_mouse_pos = None
             self._mouse_dragged = False
-            self.end_move_gizmo_drag()
+            self.end_transform_gizmo_drag()
             event.accept()
             return
         super().mouseReleaseEvent(event)
@@ -671,14 +820,14 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
 
         if (
             self._scene_buffers is None
-            or not self._selected_objects
+            or not self._highlight_objects
             or self._scene_buffers.is_empty
         ):
             return
 
         spans = [
             span
-            for scene_object in self._selected_objects
+            for scene_object in self._highlight_objects
             for span in (self._scene_buffers.span_for(scene_object),)
             if span is not None and span.count > 0
         ]
@@ -731,7 +880,6 @@ class QtGLViewport(QtOpenGLWidgets.QOpenGLWidget):
             self._selected_object is None
             or self._gizmo_mode == "select"
             or self._scene_buffers is None
-            or self._scene_buffers.span_for(self._selected_object) is None
         ):
             return
 

@@ -10,19 +10,26 @@ from PySide6 import QtCore, QtWidgets
 
 from app.scene_graph import SceneGraphModel, SceneGraphRoles
 from app.viewport import QtGLViewport
-from scene import SceneObject
+from scene import SceneObject, SceneSession
 
 
 class SceneGraphPanel(QtWidgets.QWidget):
     nodeSelected = QtCore.Signal(object)
 
-    def __init__(self, world=None, parent=None):
+    def __init__(self, world=None, parent=None, session=None):
         super().__init__(parent)
+        self._session = None
+        self._applying_session_selection = False
         self._model = SceneGraphModel(world, self)
 
         self._tree = QtWidgets.QTreeView(self)
         self._tree.setModel(self._model)
-        self._tree.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows)
+        self._tree.setSelectionBehavior(
+            QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self._tree.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection
+        )
         self._tree.setUniformRowHeights(True)
         self._tree.setAlternatingRowColors(True)
         self._tree.setExpandsOnDoubleClick(True)
@@ -30,12 +37,19 @@ class SceneGraphPanel(QtWidgets.QWidget):
         self._tree.expandToDepth(1)
         self._tree.header().setHidden(True)
         self._tree.header().setStretchLastSection(True)
-        self._tree.header().setSectionResizeMode(0, QtWidgets.QHeaderView.ResizeMode.Stretch)
-        self._tree.selectionModel().currentChanged.connect(self._on_current_changed)
+        self._tree.header().setSectionResizeMode(
+            0,
+            QtWidgets.QHeaderView.ResizeMode.Stretch,
+        )
+        self._tree.selectionModel().selectionChanged.connect(
+            self._on_selection_changed
+        )
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._tree)
+        if session is not None:
+            self.set_session(session)
 
     @property
     def model(self):
@@ -49,23 +63,111 @@ class SceneGraphPanel(QtWidgets.QWidget):
         self._model.set_world(world)
         self._tree.expandToDepth(1)
 
+    def set_session(self, session):
+        if self._session is session:
+            return
+        if self._session is not None:
+            self._session.remove_selection_listener(self._on_session_selection_changed)
+            self._session.remove_world_listener(self._on_session_world_changed)
+        self._session = session
+        self._model.set_session(session)
+        if session is not None:
+            session.add_selection_listener(self._on_session_selection_changed)
+            session.add_world_listener(self._on_session_world_changed)
+            self._sync_selection_from_session()
+        self._tree.expandToDepth(1)
+
     def select_payload(self, payload):
         index = self._model.index_for_payload(payload)
         if not index.isValid():
-            self._tree.clearSelection()
+            if self._session is not None:
+                self._session.clear_selection()
+            else:
+                self._clear_tree_selection()
             return
-        self._tree.setCurrentIndex(index)
+        if self._session is not None and isinstance(payload, SceneObject):
+            self._session.replace_selection(payload)
+        else:
+            self._select_indexes((index,))
 
     def selected_payload(self):
         index = self._tree.currentIndex()
         return index.data(SceneGraphRoles.PayloadRole) if index.isValid() else None
 
     def selected_scene_objects(self):
-        return self._model.scene_objects_for_index(self._tree.currentIndex())
+        if self._session is not None:
+            return self._session.selected_scene_objects()
+        indexes = self._selected_object_indexes()
+        return tuple(self._model.scene_object_for_index(index) for index in indexes)
 
-    def _on_current_changed(self, current, previous):
-        del previous
-        self.nodeSelected.emit(self._model.scene_objects_for_index(current))
+    def _on_selection_changed(self, selected, deselected):
+        del selected, deselected
+        if self._applying_session_selection:
+            return
+        scene_objects = [
+            self._model.scene_object_for_index(index)
+            for index in self._selected_object_indexes()
+        ]
+        scene_objects = [obj for obj in scene_objects if obj is not None]
+        active = self._model.scene_object_for_index(self._tree.currentIndex())
+        if active not in scene_objects:
+            active = scene_objects[-1] if scene_objects else None
+        if self._session is not None:
+            self._session.set_selection(scene_objects, active=active)
+        self.nodeSelected.emit(tuple(scene_objects))
+
+    def _on_session_selection_changed(self, session):
+        del session
+        self._sync_selection_from_session()
+
+    def _on_session_world_changed(self, session):
+        self.set_world(session.world)
+        self._sync_selection_from_session()
+
+    def _sync_selection_from_session(self):
+        if self._session is None:
+            return
+        indexes = [
+            self._model.index_for_payload(obj)
+            for obj in self._session.selected_scene_objects()
+        ]
+        self._select_indexes(tuple(index for index in indexes if index.isValid()))
+        active = self._session.active_scene_object()
+        if active is not None:
+            active_index = self._model.index_for_payload(active)
+            if active_index.isValid():
+                self._tree.setCurrentIndex(active_index)
+
+    def _selected_object_indexes(self):
+        indexes = self._tree.selectionModel().selectedRows(0)
+        return tuple(
+            index
+            for index in indexes
+            if self._model.scene_object_for_index(index) is not None
+        )
+
+    def _select_indexes(self, indexes):
+        self._applying_session_selection = True
+        try:
+            selection_model = self._tree.selectionModel()
+            blocker = QtCore.QSignalBlocker(selection_model)
+            try:
+                selection_model.clearSelection()
+                for index in indexes:
+                    selection_model.select(
+                        index,
+                        QtCore.QItemSelectionModel.SelectionFlag.Select
+                        | QtCore.QItemSelectionModel.SelectionFlag.Rows,
+                    )
+                if indexes:
+                    self._tree.setCurrentIndex(indexes[-1])
+            finally:
+                del blocker
+        finally:
+            self._applying_session_selection = False
+
+    def _clear_tree_selection(self):
+        self._select_indexes(())
 
 
 class RoxyMainWindow(QtWidgets.QMainWindow):
@@ -74,8 +176,9 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
         self.setWindowTitle("Roxy")
         self.resize(1280, 820)
 
-        self._scene_graph = SceneGraphPanel(world, self)
-        self._viewport = QtGLViewport(world, self)
+        self._session = SceneSession(world)
+        self._scene_graph = SceneGraphPanel(parent=self, session=self._session)
+        self._viewport = QtGLViewport(parent=self, session=self._session)
 
         scene_graph_dock = QtWidgets.QDockWidget("Scene Graph", self)
         scene_graph_dock.setObjectName("sceneGraphDock")
@@ -83,10 +186,6 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
         self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, scene_graph_dock)
 
         self.setCentralWidget(self._viewport)
-
-        self._scene_graph.nodeSelected.connect(self._select_viewport_object)
-        self._scene_graph.model.dataChanged.connect(self._refresh_viewport_geometry)
-        self._viewport.objectSelected.connect(self._scene_graph.select_payload)
 
     @property
     def scene_graph(self):
@@ -96,21 +195,12 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
     def viewport(self):
         return self._viewport
 
+    @property
+    def session(self):
+        return self._session
+
     def set_world(self, world):
-        self._scene_graph.set_world(world)
-        self._viewport.set_world(world)
-
-    def _select_viewport_object(self, payload):
-        if isinstance(payload, SceneObject):
-            self._viewport.set_selected_object(payload)
-        else:
-            scene_objects = tuple(payload or ())
-            active = scene_objects[0] if scene_objects else None
-            self._viewport.set_selected_objects(scene_objects, active_object=active)
-
-    def _refresh_viewport_geometry(self, top_left, bottom_right, roles):
-        del top_left, bottom_right, roles
-        self._viewport.refresh_scene_geometry()
+        self._session.set_world(world)
 
 
 def run(world=None):

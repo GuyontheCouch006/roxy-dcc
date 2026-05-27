@@ -10,6 +10,8 @@ from scene.shape import Shape
 from scene.mesh import IndexedMesh, Mesh, Triangle
 from scene.scene_object import SceneObject
 from scene.world import World
+from scene.object_handle import ObjectHandle
+from scene.session import SceneSession
 from scene.camera import Camera
 from scene.materials import (Material, Diffuse, Metal, Dielectric,
                               Emissive, Glossy, create_material_from_dict)

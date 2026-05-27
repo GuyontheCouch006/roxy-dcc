@@ -5,12 +5,18 @@ from rendering.gl_viewport import (
     ViewportCamera,
     _apply_world_translation,
     _build_gizmo_vertices,
+    _object_gizmo_origin,
+    _object_gizmo_size,
     _pinch_view_action,
     _scroll_wheel_view_action,
     build_scene_viewport_buffers,
+    gizmo_axis_rotation_matrix,
+    gizmo_axis_scale_matrix,
     move_gizmo_drag_delta,
     pick_move_gizmo_axis,
     pick_scene_object,
+    rotate_gizmo_drag_degrees,
+    scale_gizmo_drag_factor,
 )
 from scene import Diffuse, IndexedMesh, Plane, SceneObject, Shape, World
 from tests.utils import approx_eq, run_tests, vec3_approx_eq
@@ -223,8 +229,10 @@ def test_pick_move_gizmo_axis_hits_projected_axis_line():
     world = _single_triangle_world()
     obj = world.objects[0]
     camera = ViewportCamera(target=(0, 0, 0), distance=10, yaw=0, pitch=0)
-    origin = camera.project_point((0.5, 0.5, 0), 800, 600)[:2]
-    x_end = camera.project_point((1.0, 0.5, 0), 800, 600)[:2]
+    origin_world = _object_gizmo_origin(obj)
+    size = _object_gizmo_size(obj)
+    origin = camera.project_point(origin_world, 800, 600)[:2]
+    x_end = camera.project_point(origin_world + np.array([size, 0, 0]), 800, 600)[:2]
     midpoint = (origin + x_end) * 0.5
 
     result = pick_move_gizmo_axis(obj, camera, midpoint[0], midpoint[1], 800, 600)
@@ -243,6 +251,38 @@ def test_move_gizmo_drag_delta_tracks_screen_projected_axis():
     delta = move_gizmo_drag_delta(camera, origin, axis, 1.0, start, end, 800, 600)
 
     assert np.allclose(delta, np.array([1, 0, 0], dtype=np.float32), atol=1e-5)
+
+
+def test_rotate_gizmo_drag_degrees_tracks_ring_plane_angle():
+    camera = ViewportCamera(target=(0, 0, 0), distance=10, yaw=0, pitch=0)
+    origin = np.array([0, 0, 0], dtype=np.float32)
+    axis = np.array([0, 0, 1], dtype=np.float32)
+    start = camera.project_point(origin + np.array([1, 0, 0], dtype=np.float32), 800, 600)[:2]
+    end = camera.project_point(origin + np.array([0, 1, 0], dtype=np.float32), 800, 600)[:2]
+
+    degrees = rotate_gizmo_drag_degrees(camera, origin, axis, start, end, 800, 600)
+
+    assert approx_eq(degrees, 90.0)
+
+
+def test_scale_gizmo_drag_factor_tracks_axis_units():
+    camera = ViewportCamera(target=(0, 0, 0), distance=10, yaw=0, pitch=0)
+    origin = np.array([0, 0, 0], dtype=np.float32)
+    axis = np.array([1, 0, 0], dtype=np.float32)
+    start = camera.project_point(origin + axis, 800, 600)[:2]
+    end = camera.project_point(origin + axis * 2.0, 800, 600)[:2]
+
+    factor = scale_gizmo_drag_factor(camera, origin, axis, 1.0, start, end, 800, 600)
+
+    assert approx_eq(factor, 2.0)
+
+
+def test_gizmo_axis_matrices_apply_expected_world_axes():
+    rotated = gizmo_axis_rotation_matrix("z", 90).transform_vector(Vec3(1, 0, 0))
+    scaled = gizmo_axis_scale_matrix("x", 3).transform_vector(Vec3(1, 1, 1))
+
+    assert vec3_approx_eq(rotated, Vec3(0, 1, 0))
+    assert vec3_approx_eq(scaled, Vec3(3, 1, 1))
 
 
 def test_apply_world_translation_updates_component_transform():
@@ -345,6 +385,9 @@ if __name__ == "__main__":
         test_pick_scene_object_allows_user_authored_infinite_planes,
         test_pick_move_gizmo_axis_hits_projected_axis_line,
         test_move_gizmo_drag_delta_tracks_screen_projected_axis,
+        test_rotate_gizmo_drag_degrees_tracks_ring_plane_angle,
+        test_scale_gizmo_drag_factor_tracks_axis_units,
+        test_gizmo_axis_matrices_apply_expected_world_axes,
         test_apply_world_translation_updates_component_transform,
         test_apply_world_translation_updates_matrix_transform,
         test_build_gizmo_vertices_returns_mode_specific_line_vertices,
