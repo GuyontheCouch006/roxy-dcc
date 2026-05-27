@@ -4,7 +4,7 @@ import tempfile
 import numpy as np
 
 from core import Color, Mat4x4, Vec3
-from scene import Camera, Glossy, SceneObject, Sphere, World
+from scene import Camera, Diffuse, Glossy, SceneObject, Sphere, World
 from scene.io import load_scene, save_scene
 from scene.mesh import IndexedMesh
 from scene.io.roxy_ascii import (
@@ -96,6 +96,20 @@ def test_world_translates_to_rxa_nodes_connections_and_back():
     assert restored.use_sky is False
     assert vec3_approx_eq(restored.background_color, Color(0.1, 0.2, 0.3))
     assert restored.active_camera.name == "camera1"
+
+
+def test_rxa_preserves_material_names_and_shared_shader_identity():
+    material = Diffuse(Color(0.7, 0.7, 0.7), name="lambertShared")
+    world = World(use_sky=False)
+    world.add_object(SceneObject(shape=Sphere(1.0), material=material, name="left"))
+    world.add_object(SceneObject(shape=Sphere(1.0), material=material, name="right"))
+
+    restored = rxa_scene_to_world(world_to_rxa_scene(world))
+    left_mat = restored.objects[0].material
+    right_mat = restored.objects[1].material
+
+    assert left_mat is right_mat
+    assert left_mat.name == "lambertShared"
 
 
 def test_load_save_scene_dispatches_rxa_extension():
@@ -230,6 +244,7 @@ if __name__ == "__main__":
         test_parse_create_set_and_connect_commands,
         test_dumps_round_trips_rxa_scene_commands,
         test_world_translates_to_rxa_nodes_connections_and_back,
+        test_rxa_preserves_material_names_and_shared_shader_identity,
         test_load_save_scene_dispatches_rxa_extension,
         test_obj_reference_rxa_scene_imports_external_obj_hierarchy,
         test_rxb_mesh_reference_imports_binary_payload,

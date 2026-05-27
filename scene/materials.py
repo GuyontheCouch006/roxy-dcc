@@ -30,9 +30,18 @@ def refract(uv, normal, eta):  # eta = n1/n2
 class Material(ABC):
     """Abstract base for all surface materials."""
 
-    def __init__(self, albedo=None, albedo_texture=None):
+    def __init__(self, albedo=None, albedo_texture=None, name=None):
         self._albedo = albedo or Color(1, 1, 1)  # Default to white if no albedo provided.
         self._albedo_texture = albedo_texture
+        self._name = name
+
+    @property
+    def name(self):
+        return self._name or ""
+
+    @name.setter
+    def name(self, value):
+        self._name = str(value) if value else None
 
     @abstractmethod
     def scatter(self, ray_in, hit_record): ...
@@ -54,8 +63,8 @@ class Material(ABC):
 class Diffuse(Material):
     """Lambertian diffuse material — scatters rays in a random hemisphere direction."""
 
-    def __init__(self, albedo, albedo_texture=None):
-        super().__init__(albedo, albedo_texture=albedo_texture)
+    def __init__(self, albedo, albedo_texture=None, name=None):
+        super().__init__(albedo, albedo_texture=albedo_texture, name=name)
 
     def taichi_type_id(self): return 0
     def taichi_params(self): return []
@@ -72,6 +81,8 @@ class Diffuse(Material):
 
     def to_dict(self):
         data = {"type": "diffuse", "albedo": self._albedo.to_dict()}
+        if self.name:
+            data["name"] = self.name
         texture = self._texture_dict()
         if texture:
             data["albedo_texture"] = texture
@@ -81,8 +92,8 @@ class Diffuse(Material):
 class Metal(Material):
     """Metallic material — reflects rays with some fuzziness."""
 
-    def __init__(self, albedo, roughness=0.0, albedo_texture=None):
-        super().__init__(albedo, albedo_texture=albedo_texture)
+    def __init__(self, albedo, roughness=0.0, albedo_texture=None, name=None):
+        super().__init__(albedo, albedo_texture=albedo_texture, name=name)
         self._roughness = min(max(roughness, 0.0), 1.0)
 
     def taichi_type_id(self): return 1
@@ -102,6 +113,8 @@ class Metal(Material):
 
     def to_dict(self):
         data = {"type": "metal", "albedo": self._albedo.to_dict(), "roughness": self._roughness}
+        if self.name:
+            data["name"] = self.name
         texture = self._texture_dict()
         if texture:
             data["albedo_texture"] = texture
@@ -110,8 +123,8 @@ class Metal(Material):
 class Dielectric(Material):
     """Dielectric material — refracts rays based on a given index of refraction."""
 
-    def __init__(self, albedo, ior=1.5, albedo_texture=None):
-        super().__init__(albedo, albedo_texture=albedo_texture)
+    def __init__(self, albedo, ior=1.5, albedo_texture=None, name=None):
+        super().__init__(albedo, albedo_texture=albedo_texture, name=name)
         self._ior = ior
 
     def taichi_type_id(self): return 2
@@ -144,14 +157,16 @@ class Dielectric(Material):
 
     def to_dict(self):
         data = {"type": "dielectric", "albedo": self._albedo.to_dict(), "ior": self._ior}
+        if self.name:
+            data["name"] = self.name
         texture = self._texture_dict()
         if texture:
             data["albedo_texture"] = texture
         return data
 
 class Emissive(Material):
-    def __init__(self, color, intensity=1.0, albedo_texture=None):
-        super().__init__(color, albedo_texture=albedo_texture)
+    def __init__(self, color, intensity=1.0, albedo_texture=None, name=None):
+        super().__init__(color, albedo_texture=albedo_texture, name=name)
         self._intensity = intensity
 
     def scatter(self, ray_in, hit_record):
@@ -168,6 +183,8 @@ class Emissive(Material):
 
     def to_dict(self):
         data = {"type": "emissive", "albedo": self._albedo.to_dict(), "intensity": self._intensity}
+        if self.name:
+            data["name"] = self.name
         texture = self._texture_dict()
         if texture:
             data["albedo_texture"] = texture
@@ -176,8 +193,8 @@ class Emissive(Material):
 class Glossy(Material):
     """Glossy material — a mix of diffuse and metal based on roughness."""
 
-    def __init__(self, albedo, roughness=0.5, albedo_texture=None):
-        super().__init__(albedo, albedo_texture=albedo_texture)
+    def __init__(self, albedo, roughness=0.5, albedo_texture=None, name=None):
+        super().__init__(albedo, albedo_texture=albedo_texture, name=name)
         self._roughness = min(max(roughness, 0.0), 1.0)
 
     def taichi_type_id(self): return 4
@@ -199,6 +216,8 @@ class Glossy(Material):
 
     def to_dict(self):
         data = {"type": "glossy", "albedo": self._albedo.to_dict(), "roughness": self._roughness}
+        if self.name:
+            data["name"] = self.name
         texture = self._texture_dict()
         if texture:
             data["albedo_texture"] = texture
@@ -208,15 +227,16 @@ def create_material_from_dict(data):
     mat_type = data["type"]
     albedo = Color.from_dict(data["albedo"])
     texture = create_texture_from_dict(data.get("albedo_texture"))
+    name = data.get("name")
     if mat_type == "diffuse":
-        return Diffuse(albedo, albedo_texture=texture)
+        return Diffuse(albedo, albedo_texture=texture, name=name)
     elif mat_type == "metal":
-        return Metal(albedo, data["roughness"], albedo_texture=texture)
+        return Metal(albedo, data["roughness"], albedo_texture=texture, name=name)
     elif mat_type == "dielectric":
-        return Dielectric(albedo, data["ior"], albedo_texture=texture)
+        return Dielectric(albedo, data["ior"], albedo_texture=texture, name=name)
     elif mat_type == "emissive":
-        return Emissive(albedo, data["intensity"], albedo_texture=texture)
+        return Emissive(albedo, data["intensity"], albedo_texture=texture, name=name)
     elif mat_type == "glossy":
-        return Glossy(albedo, data["roughness"], albedo_texture=texture)
+        return Glossy(albedo, data["roughness"], albedo_texture=texture, name=name)
     else:
         raise ValueError(f"Unknown material type: {mat_type}")

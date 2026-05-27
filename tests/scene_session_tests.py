@@ -6,8 +6,8 @@
 #              stable object handles, selection state, transforms, and undo.
 # ============================================
 
-from core import Mat4x4, Vec3
-from scene import SceneObject, World
+from core import Color, Mat4x4, Vec3
+from scene import Diffuse, SceneObject, Sphere, World
 from tests.utils import approx_eq, run_tests, vec3_approx_eq
 
 
@@ -317,6 +317,74 @@ def test_undo_depth_trims_oldest_entries():
     assert vec3_approx_eq(root.translation, Vec3(11, 0, 0))
 
 
+def test_session_returns_stable_non_object_handles_and_payload_selection():
+    mat = Diffuse(Color(0.2, 0.3, 0.4), name="sharedLambert")
+    shape_obj = SceneObject(shape=Sphere(1.0), material=mat, name="ball")
+    world = World(objects=[shape_obj], use_sky=False)
+    session = _session(world)
+    shape = shape_obj.shapes[0]
+
+    shape_handle = session.shape(shape)
+    material_handle = session.material("sharedLambert")
+    history_handle = session.history_node(f"{shape.name or 'Sphere'}Source")
+
+    assert session.shape(shape) is shape_handle
+    assert session.material(mat) is material_handle
+    assert shape_handle.raw is shape
+    assert material_handle.raw is mat
+    assert history_handle.raw.shape is shape
+
+    session.set_selected_payload(material_handle)
+
+    assert session.selected_payload() is material_handle
+    assert session.selected_raw_payload() is mat
+
+
+def test_handle_set_attr_and_shader_assignment_are_undoable():
+    old_mat = Diffuse(Color(0.2, 0.3, 0.4), name="oldMat")
+    new_mat = Diffuse(Color(0.7, 0.7, 0.7), name="newMat")
+    obj = SceneObject(shape=Sphere(1.0), material=old_mat, name="ball")
+    sibling = SceneObject(shape=Sphere(1.0), material=new_mat, name="other")
+    world = World(objects=[obj, sibling], use_sky=False)
+    session = _session(world)
+    shape_handle = session.shape(obj.shapes[0])
+    material_handle = session.material("newMat")
+
+    shape_handle.set_attr("radius", 2.5)
+    material_handle.set_attr("albedo", Color(0.1, 0.2, 0.3))
+    shape_handle.connect_shader(material_handle)
+
+    assert approx_eq(obj.shape._radius, 2.5)
+    assert vec3_approx_eq(new_mat._albedo, Color(0.1, 0.2, 0.3))
+    assert obj.material is new_mat
+
+    session.undo()
+    assert obj.material is old_mat
+    session.undo()
+    assert vec3_approx_eq(new_mat._albedo, Color(0.7, 0.7, 0.7))
+    session.undo()
+    assert approx_eq(obj.shape._radius, 1.0)
+
+
+def test_connect_attr_rejects_invalid_connections():
+    mat = Diffuse(Color(0.2, 0.3, 0.4), name="mat")
+    obj = SceneObject(shape=Sphere(1.0), material=mat, name="ball")
+    world = World(objects=[obj], use_sky=False)
+    session = _session(world)
+
+    try:
+        session.connect_attr("mat.outColor", "ball.surfaceShader")
+        assert False, "Expected unsupported source attr to raise"
+    except ValueError:
+        pass
+
+    try:
+        session.connect_attr("mat.outSurface", "ballShape.translate")
+        assert False, "Expected unsupported destination attr to raise"
+    except (KeyError, ValueError):
+        pass
+
+
 if __name__ == "__main__":
     run_tests([
         test_session_returns_stable_handles_for_world_objects,
@@ -327,4 +395,7 @@ if __name__ == "__main__":
         test_undo_redo_restore_transform_and_selection_state,
         test_undo_disabled_records_no_history,
         test_undo_depth_trims_oldest_entries,
+        test_session_returns_stable_non_object_handles_and_payload_selection,
+        test_handle_set_attr_and_shader_assignment_are_undoable,
+        test_connect_attr_rejects_invalid_connections,
     ])

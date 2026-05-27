@@ -111,6 +111,28 @@ def test_scene_graph_model_selection_includes_child_objects():
     assert model.scene_objects_for_index(camera_index) == ()
 
 
+def test_scene_graph_model_shapes_show_shared_shader_children():
+    mat = Diffuse(Color(0.7, 0.7, 0.7), name="lambert1")
+    world = World(use_sky=False)
+    left = SceneObject(shape=Sphere(1.0), material=mat, name="left")
+    right = SceneObject(shape=Sphere(1.0), material=mat, name="right")
+    world.add_object(left)
+    world.add_object(right)
+    model = SceneGraphModel(world)
+
+    left_shape_index = model.index(0, 0, model.index_for_payload(left))
+    right_shape_index = model.index(0, 0, model.index_for_payload(right))
+    left_shader_index = model.index(0, 0, left_shape_index)
+    right_shader_index = model.index(0, 0, right_shape_index)
+
+    assert left_shader_index.data() == "lambert1"
+    assert right_shader_index.data() == "lambert1"
+    assert left_shader_index.data(SceneGraphRoles.KindRole) == "material"
+    assert left_shader_index.data(SceneGraphRoles.PayloadRole) is mat
+    assert right_shader_index.data(SceneGraphRoles.PayloadRole) is mat
+    assert "shared x2" in left_shader_index.data(QtCore.Qt.ItemDataRole.ToolTipRole)
+
+
 def _world_with_hierarchy():
     world = World(use_sky=False)
     root = SceneObject(name="assembly")
@@ -139,4 +161,5 @@ if __name__ == "__main__":
         test_scene_graph_model_visibility_checkbox_updates_world_object,
         test_scene_graph_model_iter_nodes_can_filter_by_kind,
         test_scene_graph_model_selection_includes_child_objects,
+        test_scene_graph_model_shapes_show_shared_shader_children,
     ])

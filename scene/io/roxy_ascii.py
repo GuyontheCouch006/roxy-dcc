@@ -187,7 +187,10 @@ def world_to_rxa_scene(world, rxb_ref_path=None, rxb_meshes=None):
         if key in material_nodes:
             return material_nodes[key]
 
-        node_name = _unique_name(f"{owner_name}_{group_name}_shader", used_names)
+        node_name = _unique_name(
+            material.name or f"{owner_name}_{group_name}_shader",
+            used_names,
+        )
         node = scene.create_node(_material_node_type(material), node_name)
         node.attrs["albedo"] = RXAAttribute("color3", _vec_to_list(material._albedo))
 
@@ -614,15 +617,15 @@ def _build_materials(scene):
                 texture = ImageTexture(texture_node.attr("file"), flip_v=texture_node.attr("flipV", True))
 
         if node.type_name == "diffuse":
-            materials[node.name] = Diffuse(albedo, albedo_texture=texture)
+            materials[node.name] = Diffuse(albedo, albedo_texture=texture, name=node.name)
         elif node.type_name == "metal":
-            materials[node.name] = Metal(albedo, node.attr("roughness", 0.0), albedo_texture=texture)
+            materials[node.name] = Metal(albedo, node.attr("roughness", 0.0), albedo_texture=texture, name=node.name)
         elif node.type_name == "dielectric":
-            materials[node.name] = Dielectric(albedo, node.attr("ior", 1.5), albedo_texture=texture)
+            materials[node.name] = Dielectric(albedo, node.attr("ior", 1.5), albedo_texture=texture, name=node.name)
         elif node.type_name == "emissive":
-            materials[node.name] = Emissive(albedo, node.attr("intensity", 1.0), albedo_texture=texture)
+            materials[node.name] = Emissive(albedo, node.attr("intensity", 1.0), albedo_texture=texture, name=node.name)
         elif node.type_name == "glossy":
-            materials[node.name] = Glossy(albedo, node.attr("roughness", 0.5), albedo_texture=texture)
+            materials[node.name] = Glossy(albedo, node.attr("roughness", 0.5), albedo_texture=texture, name=node.name)
     return materials
 
 

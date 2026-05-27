@@ -238,8 +238,10 @@ class SceneGraphModel(QtCore.QAbstractItemModel):
 
         root = SceneGraphNode("World", "world", world, _world_detail(world))
 
+        material_usage = _material_usage(world)
+
         for row, obj in enumerate(world.objects):
-            root.append(_object_node(obj, row))
+            root.append(_object_node(obj, row, material_usage))
 
         for row, camera in enumerate(world.cameras):
             root.append(_camera_node(camera, row, camera is world.active_camera))
@@ -250,7 +252,8 @@ class SceneGraphModel(QtCore.QAbstractItemModel):
         return root
 
 
-def _object_node(obj, row):
+def _object_node(obj, row, material_usage=None):
+    material_usage = material_usage or {}
     shapes = getattr(obj, "shapes", ())
     children = getattr(obj, "children", ())
     node = SceneGraphNode(
@@ -261,22 +264,37 @@ def _object_node(obj, row):
     )
 
     for child_row, child in enumerate(children):
-        node.append(_object_node(child, child_row))
+        node.append(_object_node(child, child_row, material_usage))
 
     for shape_row, shape in enumerate(shapes):
-        node.append(_shape_node(shape, shape_row))
+        node.append(_shape_node(shape, shape_row, material_usage))
 
     return node
 
 
-def _shape_node(shape, row):
+def _shape_node(shape, row, material_usage=None):
+    material_usage = material_usage or {}
     geometry = getattr(shape, "geometry", None)
     geometry_type = type(geometry).__name__ if geometry is not None else "None"
-    return SceneGraphNode(
+    node = SceneGraphNode(
         _node_name(shape, f"shape{row + 1}", fallback_attr="name") or geometry_type,
         "shape",
         shape,
         _shape_detail(shape, geometry_type),
+    )
+    for group_name, material in getattr(shape, "material_groups", {}).items():
+        if material is not None:
+            node.append(_material_node(material, group_name, material_usage))
+    return node
+
+
+def _material_node(material, group_name, material_usage):
+    count = material_usage.get(id(material), 1)
+    return SceneGraphNode(
+        _material_name(material),
+        "material",
+        material,
+        _material_detail(group_name, count),
     )
 
 
@@ -336,6 +354,35 @@ def _shape_detail(shape, geometry_type):
         return geometry_type
     names = ", ".join(str(name) for name in groups.keys())
     return f"{geometry_type}; groups: {names}"
+
+
+def _material_detail(group_name, count):
+    parts = [f"group: {group_name}"]
+    if count > 1:
+        parts.append(f"shared x{count}")
+    return "; ".join(parts)
+
+
+def _material_name(material):
+    name = getattr(material, "name", "")
+    return name or type(material).__name__
+
+
+def _material_usage(world):
+    usage = {}
+    for obj in getattr(world, "objects", ()):
+        for scene_object in _walk_objects((obj,)):
+            for shape in getattr(scene_object, "shapes", ()):
+                for material in getattr(shape, "material_groups", {}).values():
+                    if material is not None:
+                        usage[id(material)] = usage.get(id(material), 0) + 1
+    return usage
+
+
+def _walk_objects(objects):
+    for obj in objects:
+        yield obj
+        yield from _walk_objects(getattr(obj, "children", ()))
 
 
 def _count_detail(items, label):
@@ -427,6 +474,10 @@ def _build_icon(kind):
         painter.drawLine(QtCore.QPointF(9.0, 12.8), QtCore.QPointF(9.0, 16.2))
         painter.drawLine(QtCore.QPointF(2.0, 8.0), QtCore.QPointF(4.0, 8.0))
         painter.drawLine(QtCore.QPointF(14.0, 8.0), QtCore.QPointF(16.0, 8.0))
+    elif kind == "material":
+        painter.drawEllipse(QtCore.QRectF(3.5, 3.5, 11.0, 11.0))
+        painter.setPen(QtGui.QPen(color.lighter(150), 1.0))
+        painter.drawEllipse(QtCore.QRectF(6.0, 6.0, 6.0, 6.0))
     else:
         painter.drawRoundedRect(QtCore.QRectF(4.0, 4.0, 10.0, 10.0), 2.0, 2.0)
 
@@ -442,6 +493,7 @@ def _icon_color(kind):
         "shape": QtGui.QColor("#7fd48b"),
         "camera": QtGui.QColor("#b48cff"),
         "light": QtGui.QColor("#ffd95a"),
+        "material": QtGui.QColor("#ee7aa8"),
     }
     return colors.get(kind, QtGui.QColor("#b8c0cc"))
 

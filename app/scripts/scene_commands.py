@@ -44,7 +44,7 @@ def create_primitive(
     )
     obj = SceneObject(
         shape=geometry,
-        material=Diffuse(DEFAULT_LAMBERT_COLOR),
+        material=_default_lambert(session),
         translation=Vec3(x, y, z),
         name=name or _unique_name(session.world, primitive_type),
         renderable=(primitive_type != "torus"),
@@ -120,9 +120,16 @@ def _object_from_obj(path):
     mesh = OBJReader.load_as_indexed_mesh(path)
     return SceneObject(
         shape=mesh,
-        material=Diffuse(DEFAULT_LAMBERT_COLOR),
+        material=Diffuse(DEFAULT_LAMBERT_COLOR, name="lambert1"),
         name=path.stem,
     )
+
+
+def _default_lambert(session):
+    try:
+        return session.material("lambert1").raw
+    except (AttributeError, KeyError, ValueError):
+        return Diffuse(DEFAULT_LAMBERT_COLOR, name="lambert1")
 
 
 def _primitive_geometry(

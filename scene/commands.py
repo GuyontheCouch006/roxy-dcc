@@ -19,6 +19,7 @@ class SessionSettings:
 class Command:
     affects_scene = False
     affects_selection = False
+    affects_payload = False
     affects_world = False
 
     def execute(self):
@@ -114,6 +115,77 @@ class SelectionCommand(Command):
 
     def undo(self):
         self._session._set_selection_raw(self.before, self.before_active)
+
+
+class PayloadSelectionCommand(Command):
+    affects_payload = True
+
+    def __init__(self, session, before, after):
+        self._session = session
+        self.before = before
+        self.after = after
+
+    def execute(self):
+        self._session._set_payload_selection_raw(self.after)
+
+    def undo(self):
+        self._session._set_payload_selection_raw(self.before)
+
+
+class AttributeCommand(Command):
+    affects_scene = True
+    affects_world = True
+
+    def __init__(self, session, target, attr_name, before, after, label="Set Attribute"):
+        self._session = session
+        self.target = target
+        self.attr_name = attr_name
+        self.before = before
+        self.after = after
+        self.label = label
+
+    def execute(self):
+        self._session._apply_attr_raw(self.target, self.attr_name, self.after)
+
+    def undo(self):
+        self._session._apply_attr_raw(self.target, self.attr_name, self.before)
+
+
+class AssignMaterialCommand(Command):
+    affects_scene = True
+    affects_world = True
+
+    def __init__(self, shape, group, before, after):
+        self.shape = shape
+        self.group = group
+        self.before = before
+        self.after = after
+
+    def execute(self):
+        self.shape._material_groups[self.group] = self.after
+
+    def undo(self):
+        if self.before is None:
+            self.shape._material_groups.pop(self.group, None)
+        else:
+            self.shape._material_groups[self.group] = self.before
+
+
+class DisconnectMaterialCommand(Command):
+    affects_scene = True
+    affects_world = True
+
+    def __init__(self, shape, group, before):
+        self.shape = shape
+        self.group = group
+        self.before = before
+
+    def execute(self):
+        self.shape._material_groups.pop(self.group, None)
+
+    def undo(self):
+        if self.before is not None:
+            self.shape._material_groups[self.group] = self.before
 
 
 class AddObjectsCommand(Command):

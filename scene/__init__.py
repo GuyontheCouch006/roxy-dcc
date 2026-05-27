@@ -11,6 +11,8 @@ from scene.mesh import IndexedMesh, Mesh, Triangle
 from scene.scene_object import SceneObject
 from scene.world import World
 from scene.object_handle import ObjectHandle
+from scene.node_handles import ShapeHandle, MaterialHandle, CameraHandle, HistoryNodeHandle
+from scene.history import GeometrySourceNode
 from scene.session import SceneSession
 from scene.camera import Camera
 from scene.materials import (Material, Diffuse, Metal, Dielectric,

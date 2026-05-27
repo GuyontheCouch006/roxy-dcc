@@ -23,6 +23,10 @@ class ObjectHandle:
     def name(self):
         return self._scene_object.name
 
+    def set_attr(self, name, value):
+        self._session.set_attr(self, name, value)
+        return self
+
     def move(self, x=0.0, y=0.0, z=0.0, local=False):
         delta = _coerce_xyz(x, y, z, default=0.0)
         self._session.move_objects(

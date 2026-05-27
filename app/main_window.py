@@ -10,6 +10,8 @@ if __package__ in (None, ""):
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from app.details_panel import DetailsPanel
+from app.node_network import NodeNetworkPanel
 from app.scene_graph import SceneGraphModel, SceneGraphRoles
 from app.scripts import scene_commands
 from app.viewport import QtGLViewport
@@ -78,11 +80,13 @@ class SceneGraphPanel(QtWidgets.QWidget):
             return
         if self._session is not None:
             self._session.remove_selection_listener(self._on_session_selection_changed)
+            self._session.remove_payload_listener(self._on_session_payload_changed)
             self._session.remove_world_listener(self._on_session_world_changed)
         self._session = session
         self._model.set_session(session)
         if session is not None:
             session.add_selection_listener(self._on_session_selection_changed)
+            session.add_payload_listener(self._on_session_payload_changed)
             session.add_world_listener(self._on_session_world_changed)
             self._sync_selection_from_session()
         self._tree.expandToDepth(1)
@@ -114,6 +118,7 @@ class SceneGraphPanel(QtWidgets.QWidget):
         del selected, deselected
         if self._applying_session_selection:
             return
+        payload = self.selected_payload()
         scene_objects = [
             self._model.scene_object_for_index(index)
             for index in self._selected_object_indexes()
@@ -123,12 +128,24 @@ class SceneGraphPanel(QtWidgets.QWidget):
         if active not in scene_objects:
             active = scene_objects[-1] if scene_objects else None
         if self._session is not None:
-            self._session.set_selection(scene_objects, active=active)
+            if isinstance(payload, SceneObject):
+                self._session.set_selection(scene_objects, active=active)
+            elif payload is not None:
+                self._session.set_selected_payload(payload)
         self.nodeSelected.emit(tuple(scene_objects))
 
     def _on_session_selection_changed(self, session):
         del session
         self._sync_selection_from_session()
+
+    def _on_session_payload_changed(self, session):
+        payload = session.selected_raw_payload()
+        if payload is None or isinstance(payload, SceneObject):
+            return
+        index = self._model.index_for_payload(payload)
+        if index.isValid():
+            self._select_indexes((index,))
+            self._tree.setCurrentIndex(index)
 
     def _on_session_world_changed(self, session):
         self.set_world(session.world)
@@ -264,6 +281,8 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
         self._recent_files_menu = None
         self._scene_graph = SceneGraphPanel(parent=self, session=self._session)
         self._viewport = QtGLViewport(parent=self, session=self._session)
+        self._details = DetailsPanel(parent=self, session=self._session)
+        self._node_network = NodeNetworkPanel(parent=self, session=self._session)
         self._build_menu_bar()
         self._update_window_title()
 
@@ -271,6 +290,21 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
         scene_graph_dock.setObjectName("sceneGraphDock")
         scene_graph_dock.setWidget(self._scene_graph)
         self.addDockWidget(QtCore.Qt.DockWidgetArea.LeftDockWidgetArea, scene_graph_dock)
+
+        details_dock = QtWidgets.QDockWidget("Details", self)
+        details_dock.setObjectName("detailsDock")
+        details_dock.setWidget(self._details)
+        self.addDockWidget(QtCore.Qt.DockWidgetArea.RightDockWidgetArea, details_dock)
+
+        node_network_dock = QtWidgets.QDockWidget("Node Network", self)
+        node_network_dock.setObjectName("nodeNetworkDock")
+        node_network_dock.setWidget(self._node_network)
+        self.addDockWidget(QtCore.Qt.DockWidgetArea.RightDockWidgetArea, node_network_dock)
+        self.splitDockWidget(
+            details_dock,
+            node_network_dock,
+            QtCore.Qt.Orientation.Vertical,
+        )
 
         self.setCentralWidget(self._viewport)
         self._undo_shortcut = QtGui.QShortcut(
@@ -287,6 +321,14 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
     @property
     def viewport(self):
         return self._viewport
+
+    @property
+    def details(self):
+        return self._details
+
+    @property
+    def node_network(self):
+        return self._node_network
 
     @property
     def session(self):

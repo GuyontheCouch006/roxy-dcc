@@ -32,6 +32,9 @@ class Shape:
     @property
     def name(self): return self._name
 
+    @name.setter
+    def name(self, value): self._name = str(value) if value else ""
+
     def set_default_material(self, material):
         self._default_material = material
 
