@@ -5,20 +5,19 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6 import QtWidgets
 
 from app.main_window import RoxyMainWindow
-from app.node_network import SceneNodeGraphModel
+from app.node_network import NodeNetworkPanel, SceneNodeGraphModel
 from core import Color
 from scene import Diffuse, SceneObject, Sphere, World
 from tests.utils import run_tests, vec3_approx_eq
 
 
-def test_main_window_hosts_details_and_node_network_docks():
+def test_main_window_hosts_details_dock_and_leaves_node_network_hidden():
     _ensure_qapp()
     window = RoxyMainWindow(_world_with_two_materials()[0])
 
     assert window.details.session is window.session
-    assert window.node_network.model is not None
     assert window.findChild(QtWidgets.QDockWidget, "detailsDock") is not None
-    assert window.findChild(QtWidgets.QDockWidget, "nodeNetworkDock") is not None
+    assert window.findChild(QtWidgets.QDockWidget, "nodeNetworkDock") is None
 
 
 def test_details_material_edit_goes_through_session_undo():
@@ -52,16 +51,17 @@ def test_node_graph_contains_history_and_shader_edges():
     assert model.node_for_payload(red) is not None
 
 
-def test_node_network_shader_rewire_uses_api_and_is_undoable():
+def test_node_network_scaffold_shader_rewire_uses_api_and_is_undoable():
     _ensure_qapp()
     world, left, _right, red, blue = _world_with_two_materials()
-    window = RoxyMainWindow(world)
+    session = _session(world)
+    panel = NodeNetworkPanel(session=session)
     shape = left.shapes[0]
 
-    window.node_network.connect_shader(blue, shape)
+    panel.connect_shader(blue, shape)
 
     assert shape.material_for_group("default") is blue
-    assert window.session.undo()
+    assert session.undo()
     assert shape.material_for_group("default") is red
 
 
@@ -99,9 +99,9 @@ def _ensure_qapp():
 
 if __name__ == "__main__":
     run_tests([
-        test_main_window_hosts_details_and_node_network_docks,
+        test_main_window_hosts_details_dock_and_leaves_node_network_hidden,
         test_details_material_edit_goes_through_session_undo,
         test_node_graph_contains_history_and_shader_edges,
-        test_node_network_shader_rewire_uses_api_and_is_undoable,
+        test_node_network_scaffold_shader_rewire_uses_api_and_is_undoable,
         test_selecting_shape_in_outliner_updates_details_without_viewport_selection,
     ])

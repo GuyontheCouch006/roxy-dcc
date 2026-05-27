@@ -11,7 +11,6 @@ if __package__ in (None, ""):
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from app.details_panel import DetailsPanel
-from app.node_network import NodeNetworkPanel
 from app.scene_graph import SceneGraphModel, SceneGraphRoles
 from app.scripts import scene_commands
 from app.viewport import QtGLViewport
@@ -282,7 +281,6 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
         self._scene_graph = SceneGraphPanel(parent=self, session=self._session)
         self._viewport = QtGLViewport(parent=self, session=self._session)
         self._details = DetailsPanel(parent=self, session=self._session)
-        self._node_network = NodeNetworkPanel(parent=self, session=self._session)
         self._build_menu_bar()
         self._update_window_title()
 
@@ -295,16 +293,6 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
         details_dock.setObjectName("detailsDock")
         details_dock.setWidget(self._details)
         self.addDockWidget(QtCore.Qt.DockWidgetArea.RightDockWidgetArea, details_dock)
-
-        node_network_dock = QtWidgets.QDockWidget("Node Network", self)
-        node_network_dock.setObjectName("nodeNetworkDock")
-        node_network_dock.setWidget(self._node_network)
-        self.addDockWidget(QtCore.Qt.DockWidgetArea.RightDockWidgetArea, node_network_dock)
-        self.splitDockWidget(
-            details_dock,
-            node_network_dock,
-            QtCore.Qt.Orientation.Vertical,
-        )
 
         self.setCentralWidget(self._viewport)
         self._undo_shortcut = QtGui.QShortcut(
@@ -325,10 +313,6 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
     @property
     def details(self):
         return self._details
-
-    @property
-    def node_network(self):
-        return self._node_network
 
     @property
     def session(self):
