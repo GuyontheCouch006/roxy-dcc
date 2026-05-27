@@ -20,7 +20,7 @@ from rendering.gl_viewport import (
     rotate_gizmo_drag_degrees,
     scale_gizmo_drag_factor,
 )
-from scene import Diffuse, IndexedMesh, Plane, SceneObject, Shape, Sphere, World
+from scene import Diffuse, IndexedMesh, Plane, SceneObject, Shape, Sphere, Torus, World
 from tests.utils import approx_eq, run_tests, vec3_approx_eq
 
 
@@ -259,6 +259,21 @@ def test_pick_scene_object_allows_user_authored_infinite_planes():
     assert result.scene_object is plane
 
 
+def test_pick_scene_object_falls_back_to_bounds_for_unimplemented_shapes():
+    torus = SceneObject(
+        shape=Torus(major_radius=1.0, minor_radius=0.25),
+        material=Diffuse(Color(0.5, 0.5, 0.5)),
+        name="torus",
+    )
+    world = World(objects=[torus], use_sky=False)
+    camera = ViewportCamera(target=(0, 0, 0), distance=5, yaw=0, pitch=0)
+
+    result = pick_scene_object(world, camera, 50, 50, 100, 100)
+
+    assert result is not None
+    assert result.scene_object is torus
+
+
 def test_pick_move_gizmo_axis_hits_projected_axis_line():
     world = _single_triangle_world()
     obj = world.objects[0]
@@ -451,6 +466,7 @@ if __name__ == "__main__":
         test_pick_scene_object_returns_nearest_object_under_cursor,
         test_pick_scene_object_skips_non_selectable_objects,
         test_pick_scene_object_allows_user_authored_infinite_planes,
+        test_pick_scene_object_falls_back_to_bounds_for_unimplemented_shapes,
         test_pick_move_gizmo_axis_hits_projected_axis_line,
         test_move_gizmo_drag_delta_tracks_screen_projected_axis,
         test_rotate_gizmo_drag_degrees_tracks_ring_plane_angle,

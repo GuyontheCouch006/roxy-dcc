@@ -1053,11 +1053,11 @@ def _pick_object_shapes(obj, world_ray):
     closest = None
 
     for shape in obj.shapes:
-        hit = shape.intersect(local_ray)
-        if hit is None:
+        local_point = _pick_shape_local_point(shape, local_ray)
+        if local_point is None:
             continue
 
-        world_point = obj.world_matrix.transform_point(hit.point)
+        world_point = obj.world_matrix.transform_point(local_point)
         world_t = (world_point - world_ray.origin).dot(world_ray.direction)
         if world_t <= 0.001:
             continue
@@ -1067,6 +1067,23 @@ def _pick_object_shapes(obj, world_ray):
             closest = result
 
     return closest
+
+
+def _pick_shape_local_point(shape, local_ray):
+    try:
+        hit = shape.intersect(local_ray)
+    except NotImplementedError:
+        bounds = shape.local_bounds()
+        if bounds is None:
+            return None
+        t = bounds.intersect(local_ray)
+        if t is None:
+            return None
+        return local_ray.at(max(float(t), 0.001))
+
+    if hit is None:
+        return None
+    return hit.point
 
 
 def pick_move_gizmo_axis(

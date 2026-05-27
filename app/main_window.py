@@ -513,7 +513,9 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
             lambda: self.create_primitive("torus"),
             object_name="createTorusAction",
         )
-        torus_action.setToolTip("Creates a transformable torus primitive.")
+        torus_action.setToolTip(
+            "Creates a viewport-only torus; ray intersection is not implemented yet."
+        )
 
         light_menu = create_menu.addMenu("Lights")
         light_menu.setObjectName("createLightsMenu")

@@ -43,6 +43,7 @@ def create_primitive(
         material=Diffuse(_color(color)),
         translation=Vec3(x, y, z),
         name=name or _unique_name(session.world, primitive_type),
+        renderable=(primitive_type != "torus"),
     )
     return session.add_object(obj, select=True)
 

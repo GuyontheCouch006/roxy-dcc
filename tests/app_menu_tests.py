@@ -9,7 +9,7 @@ from PySide6 import QtGui, QtWidgets
 from app.main_window import RoxyMainWindow, versioned_scene_path
 from app.scripts import scene_commands
 from core import Vec3
-from scene import Emissive, Sphere, World
+from scene import Emissive, Sphere, Torus, World
 from tests.utils import run_tests
 
 
@@ -78,6 +78,21 @@ def test_create_sphere_menu_action_dispatches_sphere_command():
     assert isinstance(window.session.world.objects[0].shape, Sphere)
 
 
+def test_menu_script_create_torus_is_viewport_only_until_intersection_exists():
+    _ensure_qapp()
+    window = RoxyMainWindow(World(use_sky=False))
+
+    handle = scene_commands.create_primitive(
+        window.session,
+        "torus",
+        name="menuTorus",
+    )
+
+    assert isinstance(handle.raw.shape, Torus)
+    assert handle.raw.renderable is False
+    assert handle.raw.selectable is True
+
+
 def test_menu_script_create_light_adds_emissive_object():
     _ensure_qapp()
     window = RoxyMainWindow(World(use_sky=False))
@@ -119,6 +134,7 @@ if __name__ == "__main__":
         test_main_window_builds_file_and_create_menus,
         test_menu_script_create_primitive_uses_session_and_is_undoable,
         test_create_sphere_menu_action_dispatches_sphere_command,
+        test_menu_script_create_torus_is_viewport_only_until_intersection_exists,
         test_menu_script_create_light_adds_emissive_object,
         _versioned_path_smoke,
     ])
