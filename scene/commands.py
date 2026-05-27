@@ -19,6 +19,7 @@ class SessionSettings:
 class Command:
     affects_scene = False
     affects_selection = False
+    affects_world = False
 
     def execute(self):
         raise NotImplementedError
@@ -112,6 +113,36 @@ class SelectionCommand(Command):
         self._session._set_selection_raw(self.after, self.after_active)
 
     def undo(self):
+        self._session._set_selection_raw(self.before, self.before_active)
+
+
+class AddObjectsCommand(Command):
+    affects_scene = True
+    affects_selection = True
+    affects_world = True
+
+    def __init__(self, session, scene_objects, select=True, active=None):
+        self._session = session
+        self.scene_objects = tuple(scene_objects)
+        self.select = bool(select)
+        self.active = active
+        self.before = tuple(session.selected_scene_objects())
+        self.before_active = session.active_scene_object()
+
+    def execute(self):
+        for scene_object in self.scene_objects:
+            if scene_object not in self._session.world.objects:
+                self._session.world.add_object(scene_object)
+        if self.select:
+            active = self.active or (self.scene_objects[-1] if self.scene_objects else None)
+            self._session._set_selection_raw(self.scene_objects, active)
+        else:
+            self._session._set_selection_raw(self.before, self.before_active)
+
+    def undo(self):
+        for scene_object in reversed(self.scene_objects):
+            if scene_object in self._session.world.objects:
+                self._session.world.remove_object(scene_object)
         self._session._set_selection_raw(self.before, self.before_active)
 
 

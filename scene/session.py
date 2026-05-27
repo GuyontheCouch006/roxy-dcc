@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from core import Vec3
 from scene.commands import (
+    AddObjectsCommand,
     SelectionCommand,
     SessionSettings,
     TransformObjectsCommand,
@@ -69,6 +70,23 @@ class SceneSession:
         self._undo_stack.clear()
         self._notify_world_changed()
         self._notify_selection_changed()
+
+    def add_object(self, scene_object, select=True):
+        self.add_objects((scene_object,), select=select)
+        return self._handle_for(scene_object)
+
+    def add_objects(self, scene_objects, select=True, active=None):
+        scene_objects = tuple(scene_objects)
+        if not scene_objects:
+            return ()
+        command = AddObjectsCommand(self, scene_objects, select=select, active=active)
+        self._execute(command)
+        return tuple(self._handle_for(scene_object) for scene_object in scene_objects)
+
+    def notify_world_changed(self):
+        self._notify_world_changed()
+        self._notify_selection_changed()
+        self._notify_scene_changed()
 
     def object(self, name_or_scene_object):
         if isinstance(name_or_scene_object, ObjectHandle):
@@ -418,6 +436,8 @@ class SceneSession:
         self._execute(TransformObjectsCommand(before, after, label=label))
 
     def _notify_for_command(self, command):
+        if command.affects_world:
+            self._notify_world_changed()
         if command.affects_selection:
             self._notify_selection_changed()
         if command.affects_scene:
