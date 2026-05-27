@@ -24,11 +24,20 @@ def test_main_window_builds_file_and_create_menus():
     assert window.findChild(QtGui.QAction, "fileOpenAction") is not None
     assert window.findChild(QtGui.QAction, "fileSaveAsAction") is not None
     assert window.findChild(QtGui.QAction, "fileVersionUpAction") is not None
-    assert window.findChild(QtGui.QAction, "fileReferenceAction") is not None
+    assert window.findChild(QtGui.QAction, "fileReferenceAction") is None
     assert window.findChild(QtGui.QAction, "fileImportAction") is not None
     assert window.findChild(QtGui.QAction, "fileExportAction") is not None
     assert window.findChild(QtGui.QAction, "createSphereAction") is not None
     assert window.findChild(QtGui.QAction, "createAreaLightAction") is not None
+
+
+def test_new_scene_command_creates_empty_scene_with_default_camera():
+    world = scene_commands.new_scene()
+
+    assert world.objects == []
+    assert len(world.cameras) == 1
+    assert world.active_camera is world.cameras[0]
+    assert world.active_camera.name == "camera1"
 
 
 def test_menu_script_create_primitive_uses_session_and_is_undoable():
@@ -47,6 +56,9 @@ def test_menu_script_create_primitive_uses_session_and_is_undoable():
     assert handle.raw in window.session.world.objects
     assert handle.raw.name == "menuSphere"
     assert isinstance(handle.raw.shape, Sphere)
+    assert handle.raw.material._albedo.r == 0.7
+    assert handle.raw.material._albedo.g == 0.7
+    assert handle.raw.material._albedo.b == 0.7
     assert handle.raw.translation == Vec3(1, 0, 0)
     assert window.session.active_scene_object() is handle.raw
     assert window.viewport.selected_object is handle.raw
@@ -67,15 +79,26 @@ def test_create_sphere_menu_action_dispatches_sphere_command():
         "x": 0.0,
         "y": 0.0,
         "z": 0.0,
-        "color_r": 0.8,
-        "color_g": 0.8,
-        "color_b": 0.8,
     }
 
     window.findChild(QtGui.QAction, "createSphereAction").trigger()
 
     assert len(window.session.world.objects) == 1
     assert isinstance(window.session.world.objects[0].shape, Sphere)
+
+
+def test_create_parameter_fields_do_not_expose_material_color():
+    _ensure_qapp()
+    window = RoxyMainWindow(World(use_sky=False))
+    primitive_keys = {field["key"] for field in window._primitive_fields("sphere")}
+    light_keys = {field["key"] for field in window._light_fields("sphere")}
+
+    assert "color_r" not in primitive_keys
+    assert "color_g" not in primitive_keys
+    assert "color_b" not in primitive_keys
+    assert "color_r" not in light_keys
+    assert "color_g" not in light_keys
+    assert "color_b" not in light_keys
 
 
 def test_menu_script_create_torus_is_viewport_only_until_intersection_exists():
@@ -132,8 +155,10 @@ if __name__ == "__main__":
 
     run_tests([
         test_main_window_builds_file_and_create_menus,
+        test_new_scene_command_creates_empty_scene_with_default_camera,
         test_menu_script_create_primitive_uses_session_and_is_undoable,
         test_create_sphere_menu_action_dispatches_sphere_command,
+        test_create_parameter_fields_do_not_expose_material_color,
         test_menu_script_create_torus_is_viewport_only_until_intersection_exists,
         test_menu_script_create_light_adds_emissive_object,
         _versioned_path_smoke,

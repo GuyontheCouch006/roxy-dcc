@@ -362,16 +362,6 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
             return self.save_scene_as()
         return self.save_scene_path(versioned_scene_path(self._current_path))
 
-    def reference_scene(self):
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self,
-            "Reference Scene or Asset",
-            "",
-            IMPORT_FILE_FILTER,
-        )
-        if path:
-            self._run_script_command(scene_commands.reference_scene, self._session, path)
-
     def import_scene(self):
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
@@ -398,7 +388,6 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
         values = self._command_values(f"Create {primitive_type.title()}", fields)
         if values is None:
             return None
-        values["color"] = self._pop_color(values)
         return self._run_script_command(
             scene_commands.create_primitive,
             self._session,
@@ -412,7 +401,6 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
         values = self._command_values(title, fields)
         if values is None:
             return None
-        values["color"] = self._pop_color(values)
         return self._run_script_command(
             scene_commands.create_light,
             self._session,
@@ -462,12 +450,6 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
             object_name="fileVersionUpAction",
         )
         file_menu.addSeparator()
-        self._add_action(
-            file_menu,
-            "Reference...",
-            self.reference_scene,
-            object_name="fileReferenceAction",
-        )
         self._add_action(
             file_menu,
             "Import...",
@@ -562,7 +544,7 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
         return fields
 
     def _light_fields(self, light_type):
-        fields = self._base_creation_fields(y=4.0, color=(1.0, 0.92, 0.76))
+        fields = self._base_creation_fields(y=4.0)
         fields.insert(1, self._float_field("intensity", "Intensity", 20.0, minimum=0.0))
         if light_type == "sphere":
             fields.insert(1, self._float_field("radius", "Radius", 0.5, minimum=0.001))
@@ -570,15 +552,12 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
             fields.insert(1, self._float_field("side_length", "Side Length", 1.0, minimum=0.001))
         return fields
 
-    def _base_creation_fields(self, *, y=0.0, color=(0.8, 0.8, 0.8)):
+    def _base_creation_fields(self, *, y=0.0):
         return [
             {"key": "name", "label": "Name", "type": "text", "default": ""},
             self._float_field("x", "Translate X", 0.0),
             self._float_field("y", "Translate Y", y),
             self._float_field("z", "Translate Z", 0.0),
-            self._float_field("color_r", "Color R", color[0], minimum=0.0, maximum=1.0),
-            self._float_field("color_g", "Color G", color[1], minimum=0.0, maximum=1.0),
-            self._float_field("color_b", "Color B", color[2], minimum=0.0, maximum=1.0),
         ]
 
     @staticmethod
@@ -601,14 +580,6 @@ class RoxyMainWindow(QtWidgets.QMainWindow):
             "decimals": decimals,
             "step": step,
         }
-
-    @staticmethod
-    def _pop_color(values):
-        return (
-            values.pop("color_r"),
-            values.pop("color_g"),
-            values.pop("color_b"),
-        )
 
     def _run_script_command(self, command, *args, **kwargs):
         try:

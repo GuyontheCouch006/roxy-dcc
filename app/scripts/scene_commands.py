@@ -3,15 +3,20 @@ from __future__ import annotations
 from pathlib import Path
 
 from core import Color, Vec3
-from scene import Cube, Diffuse, Emissive, Plane, SceneObject, Sphere, Torus
+from scene import Camera, Cube, Diffuse, Emissive, Plane, SceneObject, Sphere, Torus
 from scene.io import load_scene
 from scene.io.obj_reader import OBJReader
 from scene.world import World
 
 
+DEFAULT_LAMBERT_COLOR = Color(0.7, 0.7, 0.7)
+
+
 def new_scene():
     """Return a fresh world for File > New."""
-    return World(use_sky=False)
+    world = World(use_sky=False)
+    world.add_camera(Camera(name="camera1"))
+    return world
 
 
 def create_primitive(
@@ -27,7 +32,6 @@ def create_primitive(
     distance=0.0,
     major_radius=1.0,
     minor_radius=0.25,
-    color=(0.8, 0.8, 0.8),
 ):
     primitive_type = primitive_type.lower()
     geometry = _primitive_geometry(
@@ -40,7 +44,7 @@ def create_primitive(
     )
     obj = SceneObject(
         shape=geometry,
-        material=Diffuse(_color(color)),
+        material=Diffuse(DEFAULT_LAMBERT_COLOR),
         translation=Vec3(x, y, z),
         name=name or _unique_name(session.world, primitive_type),
         renderable=(primitive_type != "torus"),
@@ -116,7 +120,7 @@ def _object_from_obj(path):
     mesh = OBJReader.load_as_indexed_mesh(path)
     return SceneObject(
         shape=mesh,
-        material=Diffuse(Color(0.8, 0.8, 0.8)),
+        material=Diffuse(DEFAULT_LAMBERT_COLOR),
         name=path.stem,
     )
 
